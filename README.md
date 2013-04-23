@@ -2,6 +2,8 @@
 
 The goal of this library is to implement [bzip2](http://www.bzip.org/) compression/decompression algorithms for [dartlang](http://www.dartlang.org/).
 
+The algorithm used here is bases on [7zip](http://www.7-zip.org/)'s source code.
+
 ##Example Usage
 The following code reads a compressed text file and prints it line by line:
 
