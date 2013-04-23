@@ -3,7 +3,7 @@ version: 0.0.2
 author: Hadi Moshayedi <hadi@moshayedi.net>
 description: bzip2 compression algorithm
 homepage: https://github.com/pykello/dartlang-bzip2
-dependencies:
+dev_dependencies:
   unittest: 0.4.5+1
 
 #dependencies:
