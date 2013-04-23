@@ -1,0 +1,9 @@
+name: bzip2
+version: 0.0.1
+author: Hadi Moshayedi <hadi@moshayedi.net>
+description: bzip2 compression algorithm
+dependencies:
+  unittest: any
+
+#dependencies:
+#  unittest: any
