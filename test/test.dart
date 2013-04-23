@@ -10,20 +10,27 @@ void main() {
   
   testBitBuffer();
   
-  group('bzip2 decompress:', () {
+  group('bzip2 decompress (CRC disabled):', () {
     for(String test in tests) {
       testBzip2Decompressor(test, '$testDir/data/$test.bz2', 
-          '$testDir/expected/$test');
+          '$testDir/expected/$test', false);
+    }
+  });
+  
+  group('bzip2 decompress (CRC enabled):', () {
+    for(String test in tests) {
+      testBzip2Decompressor(test, '$testDir/data/$test.bz2', 
+          '$testDir/expected/$test', true);
     }
   });
 }
 
 void testBzip2Decompressor(String testName, String inputFilename, 
-                           String expectedFilename) {
+                           String expectedFilename, bool checkCrc) {
   test('test $testName', () {
     RandomAccessFile expectedFile = new File(expectedFilename).openSync(mode: FileMode.READ);
     Stream<List<int>> inputStream = new File(inputFilename).openRead();
-    Stream<List<int>> decodedStream = inputStream.transform(new Bzip2Decompressor());
+    Stream<List<int>> decodedStream = inputStream.transform(new Bzip2Decompressor(checkCrc: checkCrc));
     
     bool done = false;
     

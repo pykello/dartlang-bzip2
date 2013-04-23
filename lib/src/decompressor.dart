@@ -55,6 +55,13 @@ class _Bzip2Decompressor {
   int _outputIndex;
   List<int> _output = [];
   
+  bool _checkCrc;
+  _Bzip2Crc _crcCoder = new _Bzip2Crc();
+  _Bzip2CombinedCrc _combinedCrc = new _Bzip2CombinedCrc();
+  int _blockCrc;
+  
+  _Bzip2Decompressor(this._checkCrc);
+  
   void writeByte(int byte) {
     _buffer.writeByte(byte);
   }
@@ -129,12 +136,19 @@ class _Bzip2Decompressor {
   
   void _readSignatures() {
     List<int> signature = _buffer.readBytes(6);
-    List<int> crc32 = _buffer.readBytes(4);
+    int crc = _buffer.readBits(32);
     
     if (_listsMatch(signature, _BLOCK_SIGNATURE)) {
+      if (_checkCrc) {
+        _blockCrc = crc;
+        _combinedCrc.update(_blockCrc);
+      }
       _state = _STATE_READ_BLOCK; 
     }
     else if(_listsMatch(signature, _FINISH_SIGNATURE)) {
+      if (_checkCrc && _combinedCrc.getDigest() != crc) {
+        throw new StateError("file CRC failed");
+      }
       _state = _STATE_STREAM_END;
     }
     else {
@@ -249,7 +263,6 @@ class _Bzip2Decompressor {
     }
   }
 
-
   void _decodeSymbols() {
     for (int i = 0; i < 256; i ++) 
       _charCounters[i] = 0;
@@ -326,9 +339,8 @@ class _Bzip2Decompressor {
     int tPos = _charCounters[256 + idx];
     int prevByte = (tPos & 0xFF);
     int numReps = 0;
-    _outputIndex = 0;
     
-    int blockSize = _blockSize;
+    int remainingSymbols = _blockSize;
     
     _beginOutput();
     
@@ -350,7 +362,7 @@ class _Bzip2Decompressor {
       prevByte = b;
       _writeOutput(b);
       
-    } while(--blockSize != 0);
+    } while(--remainingSymbols != 0);
     
     _endOutput();
         
@@ -358,13 +370,15 @@ class _Bzip2Decompressor {
   }
   
   void _decodeBlock2Rand() {
-    throw new StateError("randomized not implemented yet");
-    _state = _STATE_READ_SIGNATURES;
+    throw new StateError("deprecated randomized files");
   }
   
   void _beginOutput() {
     _outputIndex = 0;
     _output = new Uint8List(_MAX_BLOCK_SIZE);
+    if (_checkCrc) {
+      _crcCoder.reset();
+    }
   }
   
   void _writeOutput(int byte) {
@@ -374,10 +388,16 @@ class _Bzip2Decompressor {
       _output = newOutput;
     }
     _output[_outputIndex++] = byte;
+    if (_checkCrc) {
+      _crcCoder.updateByte(byte);
+    }
   }
   
   void _endOutput() {
     _output = _output.sublist(0, _outputIndex);
+    if (_checkCrc && _crcCoder.getDigest() != _blockCrc) {
+      throw new StateError("block CRC failed");
+    }
   }
 }
 
