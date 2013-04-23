@@ -52,8 +52,8 @@ class _Bzip2Decompressor {
   List<int> _charCounters = new List<int>(256 + _MAX_BLOCK_SIZE);
   
   BitBuffer _buffer = new BitBuffer(_MAX_BYTES_REQUIRED);
+  int _outputIndex;
   List<int> _output = [];
-  List<int> _outputTemp = new Uint8List(_MAX_BLOCK_SIZE * 2);
   
   void writeByte(int byte) {
     _buffer.writeByte(byte);
@@ -109,7 +109,6 @@ class _Bzip2Decompressor {
         _decodeBlock2Rand();
         break;
       case _STATE_STREAM_END:
-        print("done");
         break;
     }
   }
@@ -327,9 +326,11 @@ class _Bzip2Decompressor {
     int tPos = _charCounters[256 + idx];
     int prevByte = (tPos & 0xFF);
     int numReps = 0;
-    int blockIndex = 0;
+    _outputIndex = 0;
     
     int blockSize = _blockSize;
+    
+    _beginOutput();
     
     do {
       int b = (tPos & 0xFF);
@@ -338,7 +339,7 @@ class _Bzip2Decompressor {
       if (numReps == _RLE_MODE_REP_SIZE)
       {
         for (; b > 0; b--) {
-          _outputTemp[blockIndex++] = prevByte;
+          _writeOutput(prevByte);
         }
         numReps = 0;
         continue;
@@ -347,11 +348,11 @@ class _Bzip2Decompressor {
         numReps = 0;
       numReps++;
       prevByte = b;
-      _outputTemp[blockIndex++] = b;
+      _writeOutput(b);
       
     } while(--blockSize != 0);
     
-    _output = _outputTemp.sublist(0, blockIndex);
+    _endOutput();
         
     _state = _STATE_READ_SIGNATURES;
   }
@@ -359,6 +360,24 @@ class _Bzip2Decompressor {
   void _decodeBlock2Rand() {
     throw new StateError("randomized not implemented yet");
     _state = _STATE_READ_SIGNATURES;
+  }
+  
+  void _beginOutput() {
+    _outputIndex = 0;
+    _output = new Uint8List(_MAX_BLOCK_SIZE);
+  }
+  
+  void _writeOutput(int byte) {
+    if (_outputIndex == _output.length) {
+      Uint8List newOutput = new Uint8List(_output.length * 2);
+      newOutput.setRange(0, _output.length, _output);
+      _output = newOutput;
+    }
+    _output[_outputIndex++] = byte;
+  }
+  
+  void _endOutput() {
+    _output = _output.sublist(0, _outputIndex);
   }
 }
 
