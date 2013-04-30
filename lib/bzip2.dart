@@ -7,6 +7,7 @@ import 'package:suffixarray/suffixarray.dart';
 
 part 'src/bitbuffer.dart';
 part 'src/compressor.dart';
+part 'src/constants.dart';
 part 'src/bzip2coder.dart';
 part 'src/crc.dart';
 part 'src/decompressor.dart';
