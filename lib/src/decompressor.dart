@@ -30,11 +30,13 @@ const int _TABLE_COUNT_MIN            = 2;
 const int _TABLE_COUNT_MAX            = 6;
 
 const int _GROUP_SIZE                 = 50;
+const int _HUFFMAN_PASSES             = 4;
+const int _MAX_HUFFMAN_LEN_FOR_ENCODING = 16;
 
 const int _SELECTOR_COUNT_BITS        = 15;
 const int _SELECTOR_COUNT_MAX         = (2 + (_MAX_BLOCK_SIZE ~/ _GROUP_SIZE));
 
-class _Bzip2Decompressor {
+class _Bzip2Decompressor implements _Bzip2Coder {
   int _state = _STATE_INIT;
   bool _noMoreData = false;
   int _dicSize;
@@ -137,7 +139,6 @@ class _Bzip2Decompressor {
   void _readSignatures() {
     List<int> signature = _buffer.readBytes(6);
     int crc = _buffer.readBits(32);
-    
     if (_listsMatch(signature, _BLOCK_SIGNATURE)) {
       if (_checkCrc) {
         _blockCrc = crc;
@@ -341,6 +342,7 @@ class _Bzip2Decompressor {
     int numReps = 0;
     
     int remainingSymbols = _blockSize;
+    List<int> bwt = _charCounters.sublist(256, 256 + _blockSize).map((x) => (x >> 8)).toList();
     
     _beginOutput();
     

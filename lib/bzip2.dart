@@ -3,36 +3,50 @@ library bzip2;
 import 'dart:io';
 import 'dart:async';
 import 'dart:typeddata';
+import 'package:suffixarray/suffixarray.dart';
 
 part 'src/bitbuffer.dart';
+part 'src/compressor.dart';
+part 'src/bzip2coder.dart';
 part 'src/crc.dart';
 part 'src/decompressor.dart';
 part 'src/huffmandecoder.dart';
+part 'src/huffmanencoder.dart';
 part 'src/mtf8decoder.dart';
+part 'src/mtf8encoder.dart';
 
-class Bzip2Decompressor extends StreamEventTransformer<List<int>, List<int>> {
-  _Bzip2Decompressor _decompressor;
-  
-  Bzip2Decompressor({checkCrc: false}) {
-    _decompressor = new _Bzip2Decompressor(checkCrc);
-  }
+abstract class _Bzip2Transformer extends 
+    StreamEventTransformer<List<int>, List<int>> {
+      
+  _Bzip2Coder _coder;
+  _Bzip2Transformer(this._coder);
   
   void handleData(List<int> data, EventSink<List<int>> sink) {
     for (int byte in data) {
-      _decompressor.writeByte(byte);
-      while (_decompressor.canProcess()) {
-        _decompressor.process();
-        sink.add(_decompressor.readOutput());
+      _coder.writeByte(byte);
+      while (_coder.canProcess()) {
+        _coder.process();
+        sink.add(_coder.readOutput());
       }
     }
   }
   
   void handleDone(EventSink<List<int>> sink) {
-    _decompressor.setEndOfData();
-    while (_decompressor.canProcess()) {
-      _decompressor.process();
-      sink.add(_decompressor.readOutput());
+    _coder.setEndOfData();
+    while (_coder.canProcess()) {
+      _coder.process();
+      sink.add(_coder.readOutput());
     }
     sink.close();
   }
+}
+
+class Bzip2Decompressor extends _Bzip2Transformer {
+  Bzip2Decompressor({bool checkCrc: false}) :
+    super(new _Bzip2Decompressor(checkCrc));
+}
+
+class Bzip2Compressor extends _Bzip2Transformer {
+  Bzip2Compressor({blockSizeFactor: 9}) :
+    super(new _Bzip2Compressor(blockSizeFactor));
 }

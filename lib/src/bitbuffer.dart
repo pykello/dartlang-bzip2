@@ -12,6 +12,13 @@ class BitBuffer {
     this._buffer = new Int8List(maxSize * 8);
   }
   
+  int getIndex() {
+    return _bufferIndex;
+  }
+  int getSize() {
+    return _bufferSize;
+  }
+  
   int readBit() {
     if (_bufferIndex >= _bufferSize) {
       throw new StateError("out of data");
@@ -49,8 +56,8 @@ class BitBuffer {
     return result;
   }
   
-  void writeByte(int byte) {
-    if (_bufferSize >= _maxSize - 7) {
+  void writeBit(int bit) {
+    if (_bufferSize >= _maxSize) {
       if (_bufferIndex == 0) {
         throw new StateError("buffer full");
       }
@@ -60,8 +67,23 @@ class BitBuffer {
       _bufferSize -= _bufferIndex;
       _bufferIndex = 0;
     }
-    for (int i = 7; i >= 0; i--) {
-      _buffer[_bufferSize++] = (byte & (1 << i)) ~/ (1 << i);
+    _buffer[_bufferSize++] = (bit == 0 ? 0 : 1);
+  }
+  
+  void writeBits(int value, int cnt) {
+    for (int i = 0; i < cnt; i++) {
+      int bitmask = (1 << (cnt - 1 - i));
+      writeBit((value & bitmask) == 0 ? 0 : 1);
+    }
+  }
+  
+  void writeByte(int byte) {
+    writeBits(byte, 8);
+  }
+  
+  void writeBytes(List<int> bytes) {
+    for(int byte in bytes) {
+      writeByte(byte);
     }
   }
   
@@ -71,5 +93,9 @@ class BitBuffer {
   
   bool isEmpty() {
     return _bufferSize - _bufferIndex == 0;
+  }
+  
+  int bitCount() {
+    return _bufferSize - _bufferIndex;
   }
 }
