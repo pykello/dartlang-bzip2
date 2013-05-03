@@ -26,6 +26,10 @@ void main() {
   });
   
   group('bzip2 compress:', () {
+    test('invalid block size factor', () {
+      expect(() => new Bzip2Compressor(blockSizeFactor: 100), throwsA(new isInstanceOf<ArgumentError>()));
+    });
+    
     for(String test in compressTests) {
       testBzip2Compressor(test, '$testDir/expected/$test');
     }

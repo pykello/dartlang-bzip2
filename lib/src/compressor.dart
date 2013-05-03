@@ -16,7 +16,11 @@ class _Bzip2Compressor implements _Bzip2Coder {
   _Bzip2Crc _blockCrc = new _Bzip2Crc();
   _Bzip2CombinedCrc _fileCrc = new _Bzip2CombinedCrc();
   
-  _Bzip2Compressor(this._blockSizeFactor);
+  _Bzip2Compressor(this._blockSizeFactor) {
+    if (this._blockSizeFactor < 1 || this._blockSizeFactor > 9) {
+      throw new ArgumentError("invalid block size factor");
+    }
+  }
 
   void writeByte(int byte) {
     _input[_inputSize] = byte;
