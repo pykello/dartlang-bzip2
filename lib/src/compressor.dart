@@ -17,6 +17,9 @@ class _Bzip2Compressor implements _Bzip2Coder {
   _Bzip2CombinedCrc _fileCrc = new _Bzip2CombinedCrc();
   
   int _originPointer;
+  List<bool> _inUse;
+  List<bool> _inUse16;
+  int _alphaSize;
   
   _Bzip2Compressor(this._blockSizeFactor) {
     if (this._blockSizeFactor < 1 || this._blockSizeFactor > 9) {
@@ -51,6 +54,8 @@ class _Bzip2Compressor implements _Bzip2Coder {
       _buffer = _readBlock();
       _buffer = _rleEncode(_buffer);
       _buffer = _burrowsWheelerTransform(_buffer);
+      _calculateInUse(_buffer);
+      _buffer = _mtf8Encode(_buffer);
       _buffer = _encodeBlock3(_buffer);      
     }
     
@@ -141,36 +146,13 @@ class _Bzip2Compressor implements _Bzip2Coder {
     List<List<int>> Codes = create2dList(_TABLE_COUNT_MAX, _MAX_ALPHA_SIZE);
     List<int> selectors = new List<int>(_SELECTOR_COUNT_MAX);
     
-    int numInUse = 0;
-    List<bool> inUse = new List<bool>.filled(256, false);
-    List<bool> inUse16 = new List<bool>.filled(16, false);
-    for (int byte in _buffer) {
-      inUse[byte] = true;
-    }
-    for (int i = 0; i < 256; i++) {
-      if (inUse[i]) {
-        inUse16[i >> 4] = true;
-        numInUse++;
-      }
-    }
-    int alphaSize = numInUse + 2;
-    
-    _Mtf8Encoder mtf = new _Mtf8Encoder();
-    int current = 0;
-    for (int i = 0; i < 256; i++) {
-      if (inUse[i]) {
-        mtf.set(current, i);
-        current++;
-      }
-    }
-    
     List<int> mtfs = new List<int>(_MAX_BLOCK_SIZE + 2);
     int mtfArraySize = 0;
     List<int> symbolCounts = new List<int>.filled(_MAX_ALPHA_SIZE, 0);
     
     int rleSize = 0;
     for (int i = 0; i < blockSize; i++) {
-      int pos = mtf.findAndMove(_buffer[i]);
+      int pos = _buffer[i];
       if (pos == 0) {
         rleSize++;
       } else
@@ -201,14 +183,14 @@ class _Bzip2Compressor implements _Bzip2Coder {
       rleSize >>= 1;
     }
     
-    if (alphaSize < 256)
-      mtfs[mtfArraySize++] = (alphaSize - 1);
+    if (_alphaSize < 256)
+      mtfs[mtfArraySize++] = (_alphaSize - 1);
     else
     {
       mtfs[mtfArraySize++] = 0xFF;
-      mtfs[mtfArraySize++] = (alphaSize - 256);
+      mtfs[mtfArraySize++] = (_alphaSize - 256);
     }
-    symbolCounts[alphaSize - 1]++;
+    symbolCounts[_alphaSize - 1]++;
     
     int numSymbols = 0;
     for (int i = 0; i < _MAX_ALPHA_SIZE; i++)
@@ -236,7 +218,7 @@ class _Bzip2Compressor implements _Bzip2Coder {
         int i = 0;
         do
           lens[i] = (i >= gs && i < ge) ? 0 : 1;
-        while (++i < alphaSize);
+        while (++i < _alphaSize);
         gs = ge;
         remFreq -= aFreq;
       }
@@ -284,7 +266,7 @@ class _Bzip2Compressor implements _Bzip2Coder {
       for (int t = 0; t < numTables; t++)
       {
         List<int> freqs = Freqs[t];
-        for (int i = 0; i < alphaSize; i++) {
+        for (int i = 0; i < _alphaSize; i++) {
           if (freqs[i] == 0)
             freqs[i] = 1;
         }
@@ -296,11 +278,11 @@ class _Bzip2Compressor implements _Bzip2Coder {
     _outputBuffer.writeBit(0); // not randomized
     _outputBuffer.writeBits(_originPointer, _ORIGIN_BIT_COUNT);
     for (int i = 0; i < 16; i++) {
-      _outputBuffer.writeBit(inUse16[i] ? 1 : 0);
+      _outputBuffer.writeBit(_inUse16[i] ? 1 : 0);
     }
     for (int i = 0; i < 256; i++) {
-      if (inUse16[i >> 4]) {
-        _outputBuffer.writeBit(inUse[i] ? 1 : 0);
+      if (_inUse16[i >> 4]) {
+        _outputBuffer.writeBit(_inUse[i] ? 1 : 0);
       }
     }
     _outputBuffer.writeBits(numTables, _TABLE_COUNT_BITS);
@@ -322,7 +304,7 @@ class _Bzip2Compressor implements _Bzip2Coder {
       List<int> lens = Lens[t];
       int len = lens[0];
       _outputBuffer.writeBits(len, _LEVEL_BITS);
-      for (int i = 0; i < alphaSize; i++) {
+      for (int i = 0; i < _alphaSize; i++) {
         int level = lens[i];
         while (len != level)
         {
@@ -420,7 +402,43 @@ class _Bzip2Compressor implements _Bzip2Coder {
     }
     
     return result;
-  }  
+  }
+  
+  void _calculateInUse(List<int> _buffer) {
+    int numInUse = 0;
+    _inUse = new List<bool>.filled(256, false);
+    _inUse16 = new List<bool>.filled(16, false);
+    for (int byte in _buffer) {
+      _inUse[byte] = true;
+    }
+    for (int i = 0; i < 256; i++) {
+      if (_inUse[i]) {
+        _inUse16[i >> 4] = true;
+        numInUse++;
+      }
+    }
+    _alphaSize = numInUse + 2;
+  }
+  
+  List<int> _mtf8Encode(List<int> _buffer) {
+    List<int> _result = new List<int>(_buffer.length);
+    
+    _Mtf8Encoder mtf8Encoder = new _Mtf8Encoder();
+    int current = 0;
+    for (int i = 0; i < 256; i++) {
+      if (_inUse[i]) {
+        mtf8Encoder.set(current, i);
+        current++;
+      }
+    }
+    
+    for (int i = 0; i < _buffer.length; i++) {
+      _result[i] = mtf8Encoder.findAndMove(_buffer[i]);
+    }
+    
+    return _result;
+  }
+  
 }
 
 List<List<int>> create2dList(int n, int m) {
