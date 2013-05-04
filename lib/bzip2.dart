@@ -2,6 +2,7 @@ library bzip2;
 
 import 'dart:io';
 import 'dart:async';
+import 'dart:math';
 import 'dart:typeddata';
 import 'package:suffixarray/suffixarray.dart';
 

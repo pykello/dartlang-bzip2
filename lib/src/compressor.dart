@@ -46,7 +46,8 @@ class _Bzip2Compressor implements _Bzip2Coder {
       _writeBlockHeader();
       
       /* compress block */
-      _buffer = _createRleBlock();
+      _buffer = _readBlock();
+      _buffer = _rleEncode(_buffer);
       _buffer = _encodeBlock3(_buffer);      
     }
     
@@ -83,50 +84,49 @@ class _Bzip2Compressor implements _Bzip2Coder {
     _noMoreData = true;
   }
   
-  List<int> _createRleBlock() {
-    List<int> buffer = new List<int>(_MAX_BYTES_REQUIRED);
-    int prevByte = _nextByte();
-    int blockSize = _blockSizeFactor * _BLOCK_SIZE_STEP - 1;
-    int numReps = 1;
-    int i = 0;
-    buffer[i++] = prevByte;
-    while (i < blockSize) // "- 1" to support RLE
-    {
-      if (endOfInput()) {
-        break;
+  List<int> _readBlock() {
+    List<int> result = new List<int>(_MAX_BYTES_REQUIRED);
+    int maxBlockSize = _blockSizeFactor * _BLOCK_SIZE_STEP;
+    int resultIndex = 0;
+    while (resultIndex < maxBlockSize && !_endOfInput()) {
+      result[resultIndex++] = _nextByte();
+    }
+    result = result.sublist(0, resultIndex);
+    return result;
+  }
+  
+  List<int> _rleEncode(List<int> block) {
+    List<int> result = new List<int>(_MAX_BYTES_REQUIRED);
+    int resultIndex = 0;
+    int blockIndex = 0;
+    while (blockIndex < block.length) {
+      int runLength = 0;
+      int currentByte = block[blockIndex];
+      int maxRunLength = min(block.length - blockIndex, _RLE_MODE_REP_SIZE + 255);
+      
+      while (runLength < maxRunLength && block[blockIndex] == currentByte) {
+        runLength++;
+        blockIndex++;
       }
-      int b = _nextByte();
-      if (b != prevByte)
-      {
-        if (numReps >= _RLE_MODE_REP_SIZE)
-          buffer[i++] = (numReps - _RLE_MODE_REP_SIZE);
-        buffer[i++] = b;
-        numReps = 1;
-        prevByte = b;
-        continue;
+      
+      for (int i = 0; i < min(runLength, _RLE_MODE_REP_SIZE); i++) {
+        result[resultIndex++] = currentByte;
       }
-      numReps++;
-      if (numReps <= _RLE_MODE_REP_SIZE)
-        buffer[i++] = b;
-      else if (numReps == _RLE_MODE_REP_SIZE + 255)
-      {
-        buffer[i++] = (numReps - _RLE_MODE_REP_SIZE);
-        numReps = 0;
+      
+      if (runLength >= _RLE_MODE_REP_SIZE) {
+        result[resultIndex++] = runLength - _RLE_MODE_REP_SIZE;
       }
     }
-    // it's to support original BZip2 decoder
-    if (numReps >= _RLE_MODE_REP_SIZE)
-      buffer[i++] = (numReps - _RLE_MODE_REP_SIZE);
     
-    buffer = buffer.sublist(0, i);
-    return buffer;
+    result = result.sublist(0, resultIndex);
+    return result;
   }
   
   int _nextByte() {
     return _input[_inputIndex++];
   }
   
-  bool endOfInput() {
+  bool _endOfInput() {
     return _inputIndex == _inputSize;
   }
   
