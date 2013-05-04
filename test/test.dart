@@ -49,7 +49,7 @@ void testBzip2Decompressor(String testName, String inputFilename,
 void testBzip2Compressor(String testName, String inputFilename) {
   test('test $testName', () {
     Stream<List<int>> inputStream = new File(inputFilename).openRead()
-                                        .transform(new Bzip2Compressor())
+                                        .transform(new Bzip2Compressor(blockSizeFactor: 1))
                                         .transform(new Bzip2Decompressor());
     
     verifyStreamOutput(inputStream, inputFilename);

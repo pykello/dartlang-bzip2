@@ -16,6 +16,8 @@ class _Bzip2Compressor implements _Bzip2Coder {
   _Bzip2Crc _blockCrc = new _Bzip2Crc();
   _Bzip2CombinedCrc _fileCrc = new _Bzip2CombinedCrc();
   
+  int _originPointer;
+  
   _Bzip2Compressor(this._blockSizeFactor) {
     if (this._blockSizeFactor < 1 || this._blockSizeFactor > 9) {
       throw new ArgumentError("invalid block size factor");
@@ -48,6 +50,7 @@ class _Bzip2Compressor implements _Bzip2Coder {
       /* compress block */
       _buffer = _readBlock();
       _buffer = _rleEncode(_buffer);
+      _buffer = _burrowsWheelerTransform(_buffer);
       _buffer = _encodeBlock3(_buffer);      
     }
     
@@ -138,10 +141,6 @@ class _Bzip2Compressor implements _Bzip2Coder {
     List<List<int>> Codes = create2dList(_TABLE_COUNT_MAX, _MAX_ALPHA_SIZE);
     List<int> selectors = new List<int>(_SELECTOR_COUNT_MAX);
     
-    List<int> blockSort = _blockSort(_buffer);
-    int _originPointer = blockSort.indexOf(0);
-    blockSort[_originPointer] = blockSize;
-    
     int numInUse = 0;
     List<bool> inUse = new List<bool>.filled(256, false);
     List<bool> inUse16 = new List<bool>.filled(16, false);
@@ -171,8 +170,7 @@ class _Bzip2Compressor implements _Bzip2Coder {
     
     int rleSize = 0;
     for (int i = 0; i < blockSize; i++) {
-      int index = blockSort[i] - 1;
-      int pos = mtf.findAndMove(_buffer[index]);
+      int pos = mtf.findAndMove(_buffer[i]);
       if (pos == 0) {
         rleSize++;
       } else
@@ -403,21 +401,26 @@ class _Bzip2Compressor implements _Bzip2Coder {
     _outputBuffer.writeBits(_fileCrc.getDigest(), 32);
   }
   
-  List<int> _blockSort(List<int> _buffer) {
+  List<int> _burrowsWheelerTransform(List<int> _buffer) {
     List<int> y = _buffer.map((x) => x + 1).toList();
     String s = new String.fromCharCodes(y);
     SuffixArray suffixArray = new SuffixArray(s + s);
+    List<int> sortedSuffixes = suffixArray.getSortedSuffixes();
+    
     List<int> result = new List<int>(_buffer.length);
     int resultIndex = 0;
-    List<int> sortedSuffixes = suffixArray.getSortedSuffixes();
+    
     for (int b in sortedSuffixes) {
       if (b < _buffer.length) {
-        result[resultIndex++] = b;
+        if (b == 0) {
+          _originPointer = resultIndex;
+        }
+        result[resultIndex++] = _buffer[(b + _buffer.length - 1) % _buffer.length];
       }
     }
+    
     return result;
-  }
-  
+  }  
 }
 
 List<List<int>> create2dList(int n, int m) {
