@@ -1,26 +1,29 @@
 part of bzip2;
 
 class _Bzip2Compressor implements _Bzip2Coder {
-  
   int _blockSizeFactor;
-  bool _noMoreData = false;
-  bool _isFirstStep = true;
-  bool _isDone = false;
   
+  /* input state */
   List<int> _input = new List<int>(_MAX_BYTES_REQUIRED);
   int _inputSize = 0;
+  bool _noMoreData = false;
   
-  BitBuffer _outputBuffer = new BitBuffer(_MAX_BYTES_REQUIRED);
-  
-  int _blockCrc;
+  /* file state */
+  bool _isFirstBlock = true;
+  bool _isDone = false;
   _Bzip2CombinedCrc _fileCrc = new _Bzip2CombinedCrc();
   
+  /* block compression information */
   List<int> _compressedBlock;
+  int _blockCrc;
   int _originPointer;
   List<bool> _inUse;
   List<bool> _inUse16;
   List<List<_HuffmanCode>> _huffmanTables;
   List<int> _selectors;
+  
+  /* output state */
+  BitBuffer _outputBuffer = new BitBuffer(_MAX_BYTES_REQUIRED);
 
   _Bzip2Compressor(this._blockSizeFactor) {
     if (this._blockSizeFactor < 1 || this._blockSizeFactor > 9) {
@@ -38,9 +41,9 @@ class _Bzip2Compressor implements _Bzip2Coder {
   }
   
   void process() {
-    if (_isFirstStep) {
+    if (_isFirstBlock) {
       _writeHeader();
-      _isFirstStep = false;
+      _isFirstBlock = false;
     }
     
     if (_inputSize != 0) {
@@ -327,13 +330,46 @@ class _Bzip2Compressor implements _Bzip2Coder {
     result = result.sublist(0, resultIndex);
     return result;
   }
-  
+    
   List _createHuffmanTables(List<int> _buffer, int alphaSize) {
+    /* initialize */
+    List<List<_HuffmanCode>> huffmanTables = _initialHuffmanTables(_buffer, alphaSize);
+    int tableCount = huffmanTables.length;
+    
+    int selectorCount = (_buffer.length + _GROUP_SIZE - 1) ~/ _GROUP_SIZE;
+    List<int> selectors = new List<int>(selectorCount);
+    
+    for (int pass = 0; pass < _HUFFMAN_PASSES; pass++) {
+      List<List<int>> frequencyTables = new List<List<int>>.generate(tableCount, 
+                                            (_) => new List<int>.filled(alphaSize, 0));
+      
+      /* update table selectors */
+      for (int group = 0; group < selectorCount; group++) {
+        int groupStart = group * _GROUP_SIZE;
+        int groupEnd = min(groupStart + _GROUP_SIZE, _buffer.length);
+        List<int> groupSymbols = _buffer.sublist(groupStart, groupEnd);
+        
+        int selectedTable = _selectHuffmanTable(groupSymbols, huffmanTables);
+        selectors[group] = selectedTable;
+        
+        for (int symbol in groupSymbols) {
+          frequencyTables[selectedTable][symbol]++;
+        }
+      }
+      
+      /* generate new tables */
+      for (int table = 0; table < tableCount; table++) {
+        _HuffmanEncoder encoder = new _HuffmanEncoder(alphaSize, _MAX_HUFFMAN_LEN_FOR_ENCODING);
+        huffmanTables[table] = encoder.generate(frequencyTables[table]);
+      }
+    }
+    
+    return [huffmanTables, selectors];
+  }
+  
+  List<List<_HuffmanCode>> _initialHuffmanTables(List<int> _buffer, int alphaSize) {
     List<List<_HuffmanCode>> huffmanTables;
-    List<int> selectors;
-    List<List<int>> frequencyTables;
-    int tableCount;
-    int selectorCount;
+    int tableCount = _TABLE_COUNT_MAX;
     
     int totalSymbolCount = 0;
     List<int> symbolCounts = new List<int>.filled(_MAX_ALPHA_SIZE, 0);
@@ -342,11 +378,7 @@ class _Bzip2Compressor implements _Bzip2Coder {
       totalSymbolCount++;
     }
     
-    tableCount = 6;
-    selectorCount = (totalSymbolCount + _GROUP_SIZE - 1) ~/ _GROUP_SIZE;
-    frequencyTables = new List<List<int>>(tableCount);
     huffmanTables = new List<List<_HuffmanCode>>(tableCount);
-    selectors = new List<int>(selectorCount);
     
     int remainingSymbols = totalSymbolCount;
     int groupStart = 0;
@@ -358,53 +390,28 @@ class _Bzip2Compressor implements _Bzip2Coder {
         currentCount += symbolCounts[groupEnd++];
       }
       
-      frequencyTables[table] = new List<int>.filled(alphaSize, 0);
       huffmanTables[table] = new List<_HuffmanCode>.generate(alphaSize, (i) => new _HuffmanCode(0, 
                                                      (groupStart <= i && i < groupEnd) ? 0 : 1));
       
       groupStart = groupEnd;
       remainingSymbols -= currentCount;
     }
-
-    for (int pass = 0; pass < _HUFFMAN_PASSES; pass++) {
-      for (int group = 0, bufferIndex = 0; group < selectorCount; group++) {
-        int groupSize = min(_GROUP_SIZE, _buffer.length - bufferIndex);
-        
-        List<int> groupSymbols = _buffer.sublist(bufferIndex, bufferIndex + groupSize);
-        selectors[group] = _findBestHuffmanTable(groupSymbols, huffmanTables);
-        
-        for (int symbol in groupSymbols) {
-          frequencyTables[selectors[group]][symbol]++;
-        }
-        
-        bufferIndex += groupSize;
-      }
-      
-      for (int table = 0; table < tableCount; table++) {
-        for (int i = 0; i < alphaSize; i++) {
-          if (frequencyTables[table][i] == 0)
-            frequencyTables[table][i] = 1;
-        }
-        _HuffmanEncoder encoder = new _HuffmanEncoder(alphaSize, _MAX_HUFFMAN_LEN_FOR_ENCODING);
-        huffmanTables[table] = encoder.generate(frequencyTables[table]);
-      }
-    }
     
-    return [huffmanTables, selectors];
+    return huffmanTables;
   }
-  
-  int _findBestHuffmanTable(List<int> symbols, List<List<_HuffmanCode>> huffmanTables) {
+
+  int _selectHuffmanTable(List<int> symbols, List<List<_HuffmanCode>> huffmanTables) {
     int bestTable = 0;
     int bestCost = 0xFFFFFFFF;
     
     for (int table = 0; table < huffmanTables.length; table++) {
-      int cost = 0;
+      int tableCost = 0;
       for (int symbol in symbols) {
-        cost += huffmanTables[table][symbol].len;
+        tableCost += huffmanTables[table][symbol].len;
       }
-      if (cost < bestCost) {
+      if (tableCost < bestCost) {
         bestTable = table;
-        bestCost = cost;
+        bestCost = tableCost;
       }
     }
     
@@ -412,4 +419,3 @@ class _Bzip2Compressor implements _Bzip2Coder {
   }
   
 }
-
