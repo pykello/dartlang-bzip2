@@ -8,7 +8,6 @@ class _Bzip2Compressor implements _Bzip2Coder {
   bool _isDone = false;
   
   List<int> _input = new List<int>(_MAX_BYTES_REQUIRED);
-  int _inputIndex = 0;
   int _inputSize = 0;
   
   BitBuffer _outputBuffer = new BitBuffer(_MAX_BYTES_REQUIRED);
@@ -52,14 +51,15 @@ class _Bzip2Compressor implements _Bzip2Coder {
       _isFirstStep = false;
     }
     
-    if (_inputIndex < _inputSize) {
+    if (_inputSize != 0) {
+      _buffer = _readBlock();
+      
       /* block header */
-      _calculateBlockCrc();
+      _calculateBlockCrc(_buffer);
       _fileCrc.update(_blockCrc.getDigest());
       _writeBlockHeader();
       
       /* compress block */
-      _buffer = _readBlock();
       _buffer = _rleEncode1(_buffer);
       _buffer = _burrowsWheelerTransform(_buffer);
       _inUse = _calculateInUse(_buffer);
@@ -76,9 +76,6 @@ class _Bzip2Compressor implements _Bzip2Coder {
       _writeFooter();
       _isDone = true;
     }
-    
-    _inputSize = 0;
-    _inputIndex = 0;
   }
   
   List<int> readOutput() {
@@ -103,14 +100,6 @@ class _Bzip2Compressor implements _Bzip2Coder {
   void setEndOfData() {
     _noMoreData = true;
   }
-  
-  int _nextByte() {
-    return _input[_inputIndex++];
-  }
-  
-  bool _endOfInput() {
-    return _inputIndex == _inputSize;
-  }  
   
   List<int> _writeBlock(List<int> _buffer) {    
     _outputBuffer.writeBit(0); /* not randomized */
@@ -193,10 +182,10 @@ class _Bzip2Compressor implements _Bzip2Coder {
     }
   }
   
-  void _calculateBlockCrc() {
+  void _calculateBlockCrc(List<int> block) {
     _blockCrc.reset();
-    for(int i = 0; i < _inputSize; i++) {
-      _blockCrc.updateByte(_input[i]);
+    for (int symbol in block) {
+      _blockCrc.updateByte(symbol);
     }
   }
   
@@ -208,13 +197,8 @@ class _Bzip2Compressor implements _Bzip2Coder {
   }
   
   List<int> _readBlock() {
-    List<int> result = new List<int>(_MAX_BYTES_REQUIRED);
-    int maxBlockSize = _blockSizeFactor * _BLOCK_SIZE_STEP;
-    int resultIndex = 0;
-    while (resultIndex < maxBlockSize && !_endOfInput()) {
-      result[resultIndex++] = _nextByte();
-    }
-    result = result.sublist(0, resultIndex);
+    List<int> result =  _input.sublist(0, _inputSize);
+    _inputSize = 0;
     return result;
   }
   
