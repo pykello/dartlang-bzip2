@@ -20,6 +20,13 @@ class _Bzip2Compressor implements _Bzip2Coder {
   List<bool> _inUse;
   List<bool> _inUse16;
   int _alphaSize;
+  List<List<int>> Lens = create2dList(_TABLE_COUNT_MAX, _MAX_ALPHA_SIZE);
+  List<List<int>> Freqs = create2dList(_TABLE_COUNT_MAX, _MAX_ALPHA_SIZE);
+  List<List<int>> Codes = create2dList(_TABLE_COUNT_MAX, _MAX_ALPHA_SIZE);
+  List<int> selectors = new List<int>(_SELECTOR_COUNT_MAX);
+  int _tableCount = 2;
+  int _selectorCount;
+
   
   _Bzip2Compressor(this._blockSizeFactor) {
     if (this._blockSizeFactor < 1 || this._blockSizeFactor > 9) {
@@ -59,7 +66,8 @@ class _Bzip2Compressor implements _Bzip2Coder {
       _alphaSize = _getAlphaSize(_inUse);
       _buffer = _mtf8Encode(_buffer);
       _buffer = _rleEncode2(_buffer);
-      _buffer = _encodeBlock3(_buffer);      
+      _createHuffmanTables(_buffer);
+      _writeBlock(_buffer);      
     }
     
     if (_noMoreData) {
@@ -100,99 +108,9 @@ class _Bzip2Compressor implements _Bzip2Coder {
   
   bool _endOfInput() {
     return _inputIndex == _inputSize;
-  }
+  }  
   
-  List<int> _encodeBlock3(List<int> _buffer) {    
-    List<List<int>> Lens = create2dList(_TABLE_COUNT_MAX, _MAX_ALPHA_SIZE);
-    List<List<int>> Freqs = create2dList(_TABLE_COUNT_MAX, _MAX_ALPHA_SIZE);
-    List<List<int>> Codes = create2dList(_TABLE_COUNT_MAX, _MAX_ALPHA_SIZE);
-    List<int> selectors = new List<int>(_SELECTOR_COUNT_MAX);
-    
-    List<int> symbolCounts = _countSymbols(_buffer);
-    
-    int numSymbols = 0;
-    for (int i = 0; i < _MAX_ALPHA_SIZE; i++)
-      numSymbols += symbolCounts[i];
-    
-    int numTables = 2;
-    int numSelectors = (numSymbols + _GROUP_SIZE - 1) ~/ _GROUP_SIZE;
-    
-    {
-      int remFreq = numSymbols;
-      int gs = 0;
-      int t = numTables;
-      do
-      {
-        int tFreq = remFreq ~/ t;
-        int ge = gs;
-        int aFreq = 0;
-        while (aFreq < tFreq) //  && ge < alphaSize)
-          aFreq += symbolCounts[ge++];
-        
-        if (ge - 1 > gs && t != numTables && t != 1 && (((numTables - t) & 1) == 1))
-          aFreq -= symbolCounts[--ge];
-        
-        List<int> lens = Lens[t - 1];
-        int i = 0;
-        do
-          lens[i] = (i >= gs && i < ge) ? 0 : 1;
-        while (++i < _alphaSize);
-        gs = ge;
-        remFreq -= aFreq;
-      }
-      while(--t != 0);
-    }
-    
-    for (int pass = 0; pass < _HUFFMAN_PASSES; pass++)
-    {
-      
-      {
-        int mtfPos = 0;
-        int g = 0;
-        do
-        {
-          List<int> symbols = new List<int>(_GROUP_SIZE);
-          int i = 0;
-          for (int i = 0; i < _GROUP_SIZE && mtfPos < _buffer.length; i++)
-          {
-            int symbol = _buffer[mtfPos++];
-            if (symbol >= 0xFF)
-              symbol += _buffer[mtfPos++];
-            symbols[i] = symbol;
-          }
-          
-          int bestPrice = 0xFFFFFFFF;
-          for (int t = 0; t < numTables; t++)
-          {
-            List<int> lens = Lens[t];
-            int price = 0;
-            for (int j = 0; j < i; j++)
-              price += lens[symbols[j]];
-            if (price < bestPrice)
-            {
-              selectors[g] = t;
-              bestPrice = price;
-            }
-          }
-          List<int> freqs = Freqs[selectors[g++]];
-          for (int j = 0; j < i; j++)
-            freqs[symbols[j]]++;
-        }
-        while (mtfPos < _buffer.length);
-      }
-      
-      for (int t = 0; t < numTables; t++)
-      {
-        List<int> freqs = Freqs[t];
-        for (int i = 0; i < _alphaSize; i++) {
-          if (freqs[i] == 0)
-            freqs[i] = 1;
-        }
-        _HuffmanEncoder encoder = new _HuffmanEncoder(_MAX_ALPHA_SIZE, _MAX_HUFFMAN_LEN_FOR_ENCODING);
-        encoder.generate(freqs, Codes[t], Lens[t]);
-      }
-    }
-    
+  List<int> _writeBlock(List<int> _buffer) {        
     _outputBuffer.writeBit(0); // not randomized
     _outputBuffer.writeBits(_originPointer, _ORIGIN_BIT_COUNT);
     for (int i = 0; i < 16; i++) {
@@ -203,11 +121,11 @@ class _Bzip2Compressor implements _Bzip2Coder {
         _outputBuffer.writeBit(_inUse[i] ? 1 : 0);
       }
     }
-    _outputBuffer.writeBits(numTables, _TABLE_COUNT_BITS);
-    _outputBuffer.writeBits(numSelectors, _SELECTOR_COUNT_BITS);
+    _outputBuffer.writeBits(_tableCount, _TABLE_COUNT_BITS);
+    _outputBuffer.writeBits(_selectorCount, _SELECTOR_COUNT_BITS);
     
     List<int> mtfSel = new List<int>.generate(_TABLE_COUNT_MAX, (x)=>x);
-    for (int i = 0; i < numSelectors; i++) {
+    for (int i = 0; i < _selectorCount; i++) {
       int sel = selectors[i];
       int pos;
       for (pos = 0; mtfSel[pos] != sel; pos++)
@@ -218,22 +136,18 @@ class _Bzip2Compressor implements _Bzip2Coder {
       mtfSel[0] = sel;
     }
     
-    for (int t = 0; t < numTables; t++) {
+    for (int t = 0; t < _tableCount; t++) {
       List<int> lens = Lens[t];
       int len = lens[0];
       _outputBuffer.writeBits(len, _LEVEL_BITS);
       for (int i = 0; i < _alphaSize; i++) {
         int level = lens[i];
-        while (len != level)
-        {
+        while (len != level) {
           _outputBuffer.writeBit(1);
-          if (len < level)
-          {
+          if (len < level) {
             _outputBuffer.writeBit(0);
             len++;
-          }
-          else
-          {
+          } else {
             _outputBuffer.writeBit(1);
             len--;
           }
@@ -247,13 +161,9 @@ class _Bzip2Compressor implements _Bzip2Coder {
     List<int> lens;
     List<int> codes;
     int mtfPos = 0;
-    do
-    {
+    do {
       int symbol = _buffer[mtfPos++];
-      if (symbol >= 0xFF)
-        symbol += _buffer[mtfPos++];
-      if (groupSize == 0)
-      {
+      if (groupSize == 0) {
         groupSize = _GROUP_SIZE;
         int t = selectors[groupIndex++];
         lens = Lens[t];
@@ -263,9 +173,7 @@ class _Bzip2Compressor implements _Bzip2Coder {
       _outputBuffer.writeBits(codes[symbol], lens[symbol]);
     }
     while (mtfPos < _buffer.length);
-    return [];
   }
-  
   
   void _writeHeader() {
     for (int byte in _BZIP_SIGNATURE) {
@@ -402,20 +310,10 @@ class _Bzip2Compressor implements _Bzip2Coder {
     return _result;
   }
 
-
   List<int> _rleEncode2(List<int> buffer) {
     List<int> result = new List<int>(_MAX_BLOCK_SIZE + 2);
     int resultIndex = 0;
     int bufferIndex = 0;
-    
-    var appendValue = (value) {
-      if (value >= 255) {
-        result[resultIndex++] = 255;
-        result[resultIndex++] = value - 255;
-      } else {
-        result[resultIndex++] = value;
-      }
-    };
     
     while (bufferIndex < buffer.length) {
       int runLength = 0;
@@ -433,29 +331,87 @@ class _Bzip2Compressor implements _Bzip2Coder {
         }
       } else {
         int value = buffer[bufferIndex++] + 1;
-        appendValue(value);
+        result[resultIndex++] = value;
       }
     }
     
-    appendValue(_alphaSize - 1);
+    result[resultIndex++] = _alphaSize - 1;
     
     result = result.sublist(0, resultIndex);
     return result;
   }
   
-  List<int> _countSymbols(List<int> buffer) {
+  void _createHuffmanTables(List<int> _buffer) {
     List<int> symbolCounts = new List<int>.filled(_MAX_ALPHA_SIZE, 0);
-    int add = 0;
-    for (int value in buffer) {
-      if (value == 255) {
-        add = 255;
-      } else {
-        symbolCounts[add + value]++;
-        add = 0;
-      }
+    for (int value in _buffer) {
+      symbolCounts[value]++;
     }
     
-    return symbolCounts;
+    int _symbolCount = 0;
+    for (int i = 0; i < _MAX_ALPHA_SIZE; i++)
+      _symbolCount += symbolCounts[i];
+    
+    _tableCount = 2;
+    _selectorCount = (_symbolCount + _GROUP_SIZE - 1) ~/ _GROUP_SIZE;
+    
+    int remFreq = _symbolCount;
+    int gs = 0;
+    int t = _tableCount;
+    do
+    {
+      int tFreq = remFreq ~/ t;
+      int ge = gs;
+      int aFreq = 0;
+      while (aFreq < tFreq)
+        aFreq += symbolCounts[ge++];
+      
+      List<int> lens = Lens[t - 1];
+      int i = 0;
+      do
+        lens[i] = (i >= gs && i < ge) ? 0 : 1;
+      while (++i < _alphaSize);
+      gs = ge;
+      remFreq -= aFreq;
+    }
+    while(--t != 0);
+    
+    for (int pass = 0; pass < _HUFFMAN_PASSES; pass++) {
+      int mtfPos = 0;
+      int g = 0;
+      do {
+        List<int> symbols = new List<int>(_GROUP_SIZE);
+        int i = 0;
+        for (; i < _GROUP_SIZE && mtfPos < _buffer.length; i++) {
+          symbols[i] = _buffer[mtfPos++];
+        }
+        
+        int bestPrice = 0xFFFFFFFF;
+        for (int t = 0; t < _tableCount; t++) {
+          List<int> lens = Lens[t];
+          int price = 0;
+          for (int j = 0; j < i; j++)
+            price += lens[symbols[j]];
+          if (price < bestPrice) {
+            selectors[g] = t;
+            bestPrice = price;
+          }
+        }
+        List<int> freqs = Freqs[selectors[g++]];
+        for (int j = 0; j < i; j++)
+          freqs[symbols[j]]++;
+      }
+      while (mtfPos < _buffer.length);
+      
+      for (int t = 0; t < _tableCount; t++) {
+        List<int> freqs = Freqs[t];
+        for (int i = 0; i < _alphaSize; i++) {
+          if (freqs[i] == 0)
+            freqs[i] = 1;
+        }
+        _HuffmanEncoder encoder = new _HuffmanEncoder(_MAX_ALPHA_SIZE, _MAX_HUFFMAN_LEN_FOR_ENCODING);
+        encoder.generate(freqs, Codes[t], Lens[t]);
+      }
+    }
   }
 }
 
