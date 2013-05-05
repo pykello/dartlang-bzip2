@@ -52,10 +52,11 @@ class _Bzip2Compressor implements _Bzip2Coder {
       
       /* compress block */
       _buffer = _readBlock();
-      _buffer = _rleEncode(_buffer);
+      _buffer = _rleEncode1(_buffer);
       _buffer = _burrowsWheelerTransform(_buffer);
       _calculateInUse(_buffer);
       _buffer = _mtf8Encode(_buffer);
+      _buffer = _rleEncode2(_buffer);
       _buffer = _encodeBlock3(_buffer);      
     }
     
@@ -92,44 +93,6 @@ class _Bzip2Compressor implements _Bzip2Coder {
     _noMoreData = true;
   }
   
-  List<int> _readBlock() {
-    List<int> result = new List<int>(_MAX_BYTES_REQUIRED);
-    int maxBlockSize = _blockSizeFactor * _BLOCK_SIZE_STEP;
-    int resultIndex = 0;
-    while (resultIndex < maxBlockSize && !_endOfInput()) {
-      result[resultIndex++] = _nextByte();
-    }
-    result = result.sublist(0, resultIndex);
-    return result;
-  }
-  
-  List<int> _rleEncode(List<int> block) {
-    List<int> result = new List<int>(_MAX_BYTES_REQUIRED);
-    int resultIndex = 0;
-    int blockIndex = 0;
-    while (blockIndex < block.length) {
-      int runLength = 0;
-      int currentByte = block[blockIndex];
-      int maxRunLength = min(block.length - blockIndex, _RLE_MODE_REP_SIZE + 255);
-      
-      while (runLength < maxRunLength && block[blockIndex] == currentByte) {
-        runLength++;
-        blockIndex++;
-      }
-      
-      for (int i = 0; i < min(runLength, _RLE_MODE_REP_SIZE); i++) {
-        result[resultIndex++] = currentByte;
-      }
-      
-      if (runLength >= _RLE_MODE_REP_SIZE) {
-        result[resultIndex++] = runLength - _RLE_MODE_REP_SIZE;
-      }
-    }
-    
-    result = result.sublist(0, resultIndex);
-    return result;
-  }
-  
   int _nextByte() {
     return _input[_inputIndex++];
   }
@@ -138,59 +101,13 @@ class _Bzip2Compressor implements _Bzip2Coder {
     return _inputIndex == _inputSize;
   }
   
-  List<int> _encodeBlock3(List<int> _buffer) {
-    int blockSize = _buffer.length;
-    
+  List<int> _encodeBlock3(List<int> _buffer) {    
     List<List<int>> Lens = create2dList(_TABLE_COUNT_MAX, _MAX_ALPHA_SIZE);
     List<List<int>> Freqs = create2dList(_TABLE_COUNT_MAX, _MAX_ALPHA_SIZE);
     List<List<int>> Codes = create2dList(_TABLE_COUNT_MAX, _MAX_ALPHA_SIZE);
     List<int> selectors = new List<int>(_SELECTOR_COUNT_MAX);
     
-    List<int> mtfs = new List<int>(_MAX_BLOCK_SIZE + 2);
-    int mtfArraySize = 0;
-    List<int> symbolCounts = new List<int>.filled(_MAX_ALPHA_SIZE, 0);
-    
-    int rleSize = 0;
-    for (int i = 0; i < blockSize; i++) {
-      int pos = _buffer[i];
-      if (pos == 0) {
-        rleSize++;
-      } else
-      {
-        while (rleSize != 0)
-        {
-          rleSize--;
-          mtfs[mtfArraySize++] = (rleSize & 1);
-          symbolCounts[rleSize & 1]++;
-          rleSize >>= 1;
-        }
-        if (pos >= 0xFE)
-        {
-          mtfs[mtfArraySize++] = 0xFF;
-          mtfs[mtfArraySize++] = (pos - 0xFE);
-        }
-        else
-          mtfs[mtfArraySize++] = (pos + 1);
-        symbolCounts[pos + 1]++;
-      }
-    }
-    
-    while (rleSize != 0)
-    {
-      rleSize--;
-      mtfs[mtfArraySize++] = (rleSize & 1);
-      symbolCounts[rleSize & 1]++;
-      rleSize >>= 1;
-    }
-    
-    if (_alphaSize < 256)
-      mtfs[mtfArraySize++] = (_alphaSize - 1);
-    else
-    {
-      mtfs[mtfArraySize++] = 0xFF;
-      mtfs[mtfArraySize++] = (_alphaSize - 256);
-    }
-    symbolCounts[_alphaSize - 1]++;
+    List<int> symbolCounts = _countSymbols(_buffer);
     
     int numSymbols = 0;
     for (int i = 0; i < _MAX_ALPHA_SIZE; i++)
@@ -235,11 +152,11 @@ class _Bzip2Compressor implements _Bzip2Coder {
         {
           List<int> symbols = new List<int>(_GROUP_SIZE);
           int i = 0;
-          for (int i = 0; i < _GROUP_SIZE && mtfPos < mtfArraySize; i++)
+          for (int i = 0; i < _GROUP_SIZE && mtfPos < _buffer.length; i++)
           {
-            int symbol = mtfs[mtfPos++];
+            int symbol = _buffer[mtfPos++];
             if (symbol >= 0xFF)
-              symbol += mtfs[mtfPos++];
+              symbol += _buffer[mtfPos++];
             symbols[i] = symbol;
           }
           
@@ -260,7 +177,7 @@ class _Bzip2Compressor implements _Bzip2Coder {
           for (int j = 0; j < i; j++)
             freqs[symbols[j]]++;
         }
-        while (mtfPos < mtfArraySize);
+        while (mtfPos < _buffer.length);
       }
       
       for (int t = 0; t < numTables; t++)
@@ -331,9 +248,9 @@ class _Bzip2Compressor implements _Bzip2Coder {
     int mtfPos = 0;
     do
     {
-      int symbol = mtfs[mtfPos++];
+      int symbol = _buffer[mtfPos++];
       if (symbol >= 0xFF)
-        symbol += mtfs[mtfPos++];
+        symbol += _buffer[mtfPos++];
       if (groupSize == 0)
       {
         groupSize = _GROUP_SIZE;
@@ -344,7 +261,7 @@ class _Bzip2Compressor implements _Bzip2Coder {
       groupSize--;
       _outputBuffer.writeBits(codes[symbol], lens[symbol]);
     }
-    while (mtfPos < mtfArraySize);
+    while (mtfPos < _buffer.length);
     return [];
   }
   
@@ -381,6 +298,44 @@ class _Bzip2Compressor implements _Bzip2Coder {
       _outputBuffer.writeByte(byte);
     }
     _outputBuffer.writeBits(_fileCrc.getDigest(), 32);
+  }
+  
+  List<int> _readBlock() {
+    List<int> result = new List<int>(_MAX_BYTES_REQUIRED);
+    int maxBlockSize = _blockSizeFactor * _BLOCK_SIZE_STEP;
+    int resultIndex = 0;
+    while (resultIndex < maxBlockSize && !_endOfInput()) {
+      result[resultIndex++] = _nextByte();
+    }
+    result = result.sublist(0, resultIndex);
+    return result;
+  }
+  
+  List<int> _rleEncode1(List<int> block) {
+    List<int> result = new List<int>(_MAX_BYTES_REQUIRED);
+    int resultIndex = 0;
+    int blockIndex = 0;
+    while (blockIndex < block.length) {
+      int runLength = 0;
+      int currentByte = block[blockIndex];
+      int maxRunLength = min(block.length - blockIndex, _RLE_MODE_REP_SIZE + 255);
+      
+      while (runLength < maxRunLength && block[blockIndex] == currentByte) {
+        runLength++;
+        blockIndex++;
+      }
+      
+      for (int i = 0; i < min(runLength, _RLE_MODE_REP_SIZE); i++) {
+        result[resultIndex++] = currentByte;
+      }
+      
+      if (runLength >= _RLE_MODE_REP_SIZE) {
+        result[resultIndex++] = runLength - _RLE_MODE_REP_SIZE;
+      }
+    }
+    
+    result = result.sublist(0, resultIndex);
+    return result;
   }
   
   List<int> _burrowsWheelerTransform(List<int> _buffer) {
@@ -438,7 +393,62 @@ class _Bzip2Compressor implements _Bzip2Coder {
     
     return _result;
   }
+
+
+  List<int> _rleEncode2(List<int> buffer) {
+    List<int> result = new List<int>(_MAX_BLOCK_SIZE + 2);
+    int resultIndex = 0;
+    int bufferIndex = 0;
+    
+    var appendValue = (value) {
+      if (value >= 255) {
+        result[resultIndex++] = 255;
+        result[resultIndex++] = value - 255;
+      } else {
+        result[resultIndex++] = value;
+      }
+    };
+    
+    while (bufferIndex < buffer.length) {
+      int runLength = 0;
+      
+      while (bufferIndex < buffer.length && buffer[bufferIndex] == 0) {
+        runLength++;
+        bufferIndex++;
+      }
+      
+      if (runLength != 0) {
+        while (runLength != 0) {
+          runLength--;
+          result[resultIndex++] = (runLength & 1);
+          runLength >>= 1;
+        }
+      } else {
+        int value = buffer[bufferIndex++] + 1;
+        appendValue(value);
+      }
+    }
+    
+    appendValue(_alphaSize - 1);
+    
+    result = result.sublist(0, resultIndex);
+    return result;
+  }
   
+  List<int> _countSymbols(List<int> buffer) {
+    List<int> symbolCounts = new List<int>.filled(_MAX_ALPHA_SIZE, 0);
+    int add = 0;
+    for (int value in buffer) {
+      if (value == 255) {
+        add = 255;
+      } else {
+        symbolCounts[add + value]++;
+        add = 0;
+      }
+    }
+    
+    return symbolCounts;
+  }
 }
 
 List<List<int>> create2dList(int n, int m) {
