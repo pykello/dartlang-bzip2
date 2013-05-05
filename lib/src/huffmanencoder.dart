@@ -7,67 +7,50 @@ const int MASK = ((1 << NUM_BITS) - 1);
 const int NUM_COUNTERS = 64;
 
 
+class _HuffmanCode {
+  int code, len;
+  _HuffmanCode(this.code, this.len);
+}
+
 class _HuffmanEncoder {
-  int numSymbols;
+  int _symbolCount;
   int maxLen;
   
-  _HuffmanEncoder(this.numSymbols, this.maxLen);
+  _HuffmanEncoder(this._symbolCount, this.maxLen);
   
-  void generate(List<int> freqs, List<int> p, List<int> lens) {
-    int num = 0;
-    {
-      for (int i = 0; i < numSymbols; i++)
-      {
-        int freq = freqs[i];
-        if (freq == 0)
-          lens[i] = 0;
-        else
-          p[num++] = i | (freq << NUM_BITS);
-      }
-      List<int> sublist = p.sublist(0, num);
-      sublist.sort();
-      p.setRange(0, num, sublist);
-    }
-    if (num < 2)
-    {
-      int minCode = 0;
-      int maxCode = 1;
-      if (num == 1)
-      {
-        maxCode = p[0] & MASK;
-        if (maxCode == 0)
-          maxCode++;
-      }
-      p[minCode] = 0;
-      p[maxCode] = 1;
-      lens[minCode] = lens[maxCode] = 1;
-      return;
-    }
+  List<_HuffmanCode> generate(List<int> freqs) {
+    List<int> codes = new List<int>(_symbolCount);
+    List<int> lens = new List<int>(_symbolCount);
     
+    for (int i = 0; i < _symbolCount; i++) {
+      codes[i] = i | (freqs[i] << NUM_BITS);
+    }
+    codes.sort();
+          
     int b, e, i;
     
     i = b = e = 0;
     do
     {
       int n, m, freq;
-      n = (i != num && (b == e || (p[i] >> NUM_BITS) <= (p[b] >> NUM_BITS))) ? i++ : b++;
-      freq = (p[n] & ~MASK);
-      p[n] = (p[n] & MASK) | (e << NUM_BITS);
-      m = (i != num && (b == e || (p[i] >> NUM_BITS) <= (p[b] >> NUM_BITS))) ? i++ : b++;
-      freq += (p[m] & ~MASK);
-      p[m] = (p[m] & MASK) | (e << NUM_BITS);
-      p[e] = (p[e] & MASK) | freq;
+      n = (i != _symbolCount && (b == e || (codes[i] >> NUM_BITS) <= (codes[b] >> NUM_BITS))) ? i++ : b++;
+      freq = (codes[n] & ~MASK);
+      codes[n] = (codes[n] & MASK) | (e << NUM_BITS);
+      m = (i != _symbolCount && (b == e || (codes[i] >> NUM_BITS) <= (codes[b] >> NUM_BITS))) ? i++ : b++;
+      freq += (codes[m] & ~MASK);
+      codes[m] = (codes[m] & MASK) | (e << NUM_BITS);
+      codes[e] = (codes[e] & MASK) | freq;
       e++;
     }
-    while (num - e > 1);
+    while (_symbolCount - e > 1);
     
     List<int> lenCounters = new List<int>.filled(kMaxLen + 1, 0);
-    p[--e] &= MASK;
+    codes[--e] &= MASK;
     lenCounters[1] = 2;
     while (e > 0)
     {
-      int len = (p[p[--e] >> NUM_BITS] >> NUM_BITS) + 1;
-      p[e] = (p[e] & MASK) | (len << NUM_BITS);
+      int len = (codes[codes[--e] >> NUM_BITS] >> NUM_BITS) + 1;
+      codes[e] = (codes[e] & MASK) | (len << NUM_BITS);
       if (len >= maxLen)
         for (len = maxLen - 1; lenCounters[len] == 0; len--);
       lenCounters[len]--;
@@ -81,7 +64,7 @@ class _HuffmanEncoder {
       {
         int num;
         for (num = lenCounters[len]; num != 0; num--)
-          lens[p[i++] & MASK] = len;
+          lens[codes[i++] & MASK] = len;
       }
     }
     
@@ -93,13 +76,13 @@ class _HuffmanEncoder {
         for (len = 1; len <= kMaxLen; len++)
           nextCodes[len] = code = (code + lenCounters[len - 1]) << 1;
       }
-      /* if (code + lenCounters[kMaxLen] - 1 != (1 << kMaxLen) - 1) throw 1; */
 
-      {
-        int i;
-        for (i = 0; i < numSymbols; i++)
-          p[i] = nextCodes[lens[i]]++;
-      }
+      for (int i = 0; i < _symbolCount; i++)
+        codes[i] = nextCodes[lens[i]]++;
     }
+    
+    List<_HuffmanCode> result = new List<_HuffmanCode>.generate(_symbolCount, 
+                                            (i) => new _HuffmanCode(codes[i], lens[i]));
+    return result;
   }
 }
