@@ -19,11 +19,12 @@ class _Bzip2Compressor implements _Bzip2Coder {
   int _originPointer;
   List<bool> _inUse;
   List<bool> _inUse16;
+  List<int> _symbols;
   int _alphaSize;
   List<List<int>> Lens = create2dList(_TABLE_COUNT_MAX, _MAX_ALPHA_SIZE);
   List<List<int>> Freqs = create2dList(_TABLE_COUNT_MAX, _MAX_ALPHA_SIZE);
   List<List<int>> Codes = create2dList(_TABLE_COUNT_MAX, _MAX_ALPHA_SIZE);
-  List<int> selectors = new List<int>(_SELECTOR_COUNT_MAX);
+  List<int> selectors;
   int _tableCount = 2;
   int _selectorCount;
 
@@ -63,8 +64,9 @@ class _Bzip2Compressor implements _Bzip2Coder {
       _buffer = _burrowsWheelerTransform(_buffer);
       _inUse = _calculateInUse(_buffer);
       _inUse16 = _calculateInUse16(_inUse);
+      _symbols = _calculateSymbols(_inUse);
       _alphaSize = _getAlphaSize(_inUse);
-      _buffer = _mtf8Encode(_buffer);
+      _buffer = _mtf8Encode(_buffer, _symbols);
       _buffer = _rleEncode2(_buffer);
       _createHuffmanTables(_buffer);
       _writeBlock(_buffer);      
@@ -110,8 +112,10 @@ class _Bzip2Compressor implements _Bzip2Coder {
     return _inputIndex == _inputSize;
   }  
   
-  List<int> _writeBlock(List<int> _buffer) {        
-    _outputBuffer.writeBit(0); // not randomized
+  List<int> _writeBlock(List<int> _buffer) {    
+    _outputBuffer.writeBit(0); /* not randomized */
+    
+    /* write inUse information */
     _outputBuffer.writeBits(_originPointer, _ORIGIN_BIT_COUNT);
     for (int i = 0; i < 16; i++) {
       _outputBuffer.writeBit(_inUse16[i] ? 1 : 0);
@@ -121,58 +125,52 @@ class _Bzip2Compressor implements _Bzip2Coder {
         _outputBuffer.writeBit(_inUse[i] ? 1 : 0);
       }
     }
+    
     _outputBuffer.writeBits(_tableCount, _TABLE_COUNT_BITS);
     _outputBuffer.writeBits(_selectorCount, _SELECTOR_COUNT_BITS);
     
-    List<int> mtfSel = new List<int>.generate(_TABLE_COUNT_MAX, (x)=>x);
-    for (int i = 0; i < _selectorCount; i++) {
-      int sel = selectors[i];
-      int pos;
-      for (pos = 0; mtfSel[pos] != sel; pos++)
+    /* write table selectors */
+    List<int> selectorsSymbols = new List<int>.generate(_TABLE_COUNT_MAX, (x)=>x);
+    List<int> selectorsEncoded = _mtf8Encode(selectors, selectorsSymbols);
+    
+    for (int selectorCode in selectorsEncoded) {
+      for (int i = 0; i < selectorCode; i++) {
         _outputBuffer.writeBit(1);
+      }
       _outputBuffer.writeBit(0);
-      for (; pos > 0; pos--)
-        mtfSel[pos] = mtfSel[pos - 1];
-      mtfSel[0] = sel;
     }
     
-    for (int t = 0; t < _tableCount; t++) {
-      List<int> lens = Lens[t];
-      int len = lens[0];
-      _outputBuffer.writeBits(len, _LEVEL_BITS);
+    /* write huffman tables */
+    for (int table = 0; table < _tableCount; table++) {
+      int currentLevel = Lens[table][0];
+      _outputBuffer.writeBits(currentLevel, _LEVEL_BITS);
+      
       for (int i = 0; i < _alphaSize; i++) {
-        int level = lens[i];
-        while (len != level) {
-          _outputBuffer.writeBit(1);
-          if (len < level) {
-            _outputBuffer.writeBit(0);
-            len++;
-          } else {
-            _outputBuffer.writeBit(1);
-            len--;
-          }
+        int nextLevel = Lens[table][i];
+        
+        while (currentLevel < nextLevel) {
+          _outputBuffer.writeBits(2, 2);
+          currentLevel++;
         }
+        while (currentLevel > nextLevel) {
+          _outputBuffer.writeBits(3, 2);
+          currentLevel--;
+        }
+        
         _outputBuffer.writeBit(0);
       }
     }
     
-    int groupSize = 0;
-    int groupIndex = 0;
-    List<int> lens;
-    List<int> codes;
-    int mtfPos = 0;
-    do {
-      int symbol = _buffer[mtfPos++];
-      if (groupSize == 0) {
-        groupSize = _GROUP_SIZE;
-        int t = selectors[groupIndex++];
-        lens = Lens[t];
-        codes = Codes[t];
+    /* write symbols */
+    for (int group = 0, bufferIndex = 0; group < _selectorCount; group++) {
+      int table = selectors[group];
+      int groupSize = min(_GROUP_SIZE, _buffer.length - bufferIndex);
+      
+      for (int groupIndex = 0; groupIndex < groupSize; groupIndex++) {
+        int symbol = _buffer[bufferIndex++];
+        _outputBuffer.writeBits(Codes[table][symbol], Lens[table][symbol]);
       }
-      groupSize--;
-      _outputBuffer.writeBits(codes[symbol], lens[symbol]);
     }
-    while (mtfPos < _buffer.length);
   }
   
   void _writeHeader() {
@@ -291,23 +289,34 @@ class _Bzip2Compressor implements _Bzip2Coder {
     return alphaSize;
   }
   
-  List<int> _mtf8Encode(List<int> _buffer) {
-    List<int> _result = new List<int>(_buffer.length);
-    
-    _Mtf8Encoder mtf8Encoder = new _Mtf8Encoder();
-    int current = 0;
+  List<int> _calculateSymbols(List<bool> inUse) {
+    List<int> symbols = new List<int>(256);
+    int symbolIndex = 0;
     for (int i = 0; i < 256; i++) {
-      if (_inUse[i]) {
-        mtf8Encoder.set(current, i);
-        current++;
+      if (inUse[i]) {
+        symbols[symbolIndex++] = i;
       }
     }
+    symbols = symbols.sublist(0, symbolIndex);
+    return symbols;
+  }
+  
+  List<int> _mtf8Encode(List<int> buffer, List<int> symbols) {
+    List<int> result = new List<int>(buffer.length);
+    List<int> mtf = new List<int>.from(symbols);
     
-    for (int i = 0; i < _buffer.length; i++) {
-      _result[i] = mtf8Encoder.findAndMove(_buffer[i]);
+    for (int index = 0; index < buffer.length; index++) {
+      int symbolIndex = mtf.indexOf(buffer[index]);
+      
+      for (int index = symbolIndex; index > 0; index--) {
+        mtf[index] = mtf[index - 1];
+      }
+      mtf[0] = buffer[index];
+      
+      result[index] = symbolIndex;
     }
     
-    return _result;
+    return result;
   }
 
   List<int> _rleEncode2(List<int> buffer) {
@@ -353,6 +362,8 @@ class _Bzip2Compressor implements _Bzip2Coder {
     
     _tableCount = 2;
     _selectorCount = (_symbolCount + _GROUP_SIZE - 1) ~/ _GROUP_SIZE;
+    
+    selectors = new List<int>(_selectorCount);
     
     int remFreq = _symbolCount;
     int gs = 0;
