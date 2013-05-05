@@ -12,22 +12,19 @@ class _Bzip2Compressor implements _Bzip2Coder {
   
   BitBuffer _outputBuffer = new BitBuffer(_MAX_BYTES_REQUIRED);
   
-  _Bzip2Crc _blockCrc = new _Bzip2Crc();
+  int _blockCrc;
   _Bzip2CombinedCrc _fileCrc = new _Bzip2CombinedCrc();
   
+  List<int> _compressedBlock;
   int _originPointer;
   List<bool> _inUse;
   List<bool> _inUse16;
-  List<int> _symbols;
-  int _alphaSize;
   List<List<int>> Lens = create2dList(_TABLE_COUNT_MAX, _MAX_ALPHA_SIZE);
-  List<List<int>> Freqs = create2dList(_TABLE_COUNT_MAX, _MAX_ALPHA_SIZE);
   List<List<int>> Codes = create2dList(_TABLE_COUNT_MAX, _MAX_ALPHA_SIZE);
   List<int> _selectors;
   int _tableCount;
   int _selectorCount;
 
-  
   _Bzip2Compressor(this._blockSizeFactor) {
     if (this._blockSizeFactor < 1 || this._blockSizeFactor > 9) {
       throw new ArgumentError("invalid block size factor");
@@ -44,32 +41,19 @@ class _Bzip2Compressor implements _Bzip2Coder {
   }
   
   void process() {
-    List<int> _buffer;
-    
     if (_isFirstStep) {
       _writeHeader();
       _isFirstStep = false;
     }
     
     if (_inputSize != 0) {
-      _buffer = _readBlock();
+      List<int> block = _readBlock();
       
-      /* block header */
-      _calculateBlockCrc(_buffer);
-      _fileCrc.update(_blockCrc.getDigest());
-      _writeBlockHeader();
+      _blockCrc = _calculateBlockCrc(block);
+      _fileCrc.update(_blockCrc);
       
-      /* compress block */
-      _buffer = _rleEncode1(_buffer);
-      _buffer = _burrowsWheelerTransform(_buffer);
-      _inUse = _calculateInUse(_buffer);
-      _inUse16 = _calculateInUse16(_inUse);
-      _symbols = _calculateSymbols(_inUse);
-      _alphaSize = _getAlphaSize(_inUse);
-      _buffer = _mtf8Encode(_buffer, _symbols);
-      _buffer = _rleEncode2(_buffer);
-      _createHuffmanTables(_buffer);
-      _writeBlock(_buffer);      
+      _compressBlock(block);
+      _writeCompressedBlock();
     }
     
     if (_noMoreData) {
@@ -100,7 +84,31 @@ class _Bzip2Compressor implements _Bzip2Coder {
     _noMoreData = true;
   }
   
-  List<int> _writeBlock(List<int> _buffer) {    
+  void _compressBlock(List<int> block) {
+    List<int> blockRleEncoded = _rleEncode1(block);
+    
+    var bwtResult = _burrowsWheelerTransform(blockRleEncoded);
+    List<int> blockSorted = bwtResult[0];
+    _originPointer = bwtResult[1];
+    
+    _inUse = _calculateInUse(blockSorted);
+    _inUse16 = _calculateInUse16(_inUse);
+    List<int> symbols = _calculateSymbols(_inUse);
+    int alphaSize = _getAlphaSize(_inUse);
+    
+    List<int> blockMtfEncoded = _mtf8Encode(blockSorted, symbols);
+    
+    List<int> blockRleEncoded2 = _rleEncode2(blockMtfEncoded, alphaSize);
+    
+    _createHuffmanTables(blockRleEncoded2, alphaSize);
+    
+    _compressedBlock = blockRleEncoded2;
+  }
+  
+  void _writeCompressedBlock() {
+    _outputBuffer.writeBytes(_BLOCK_SIGNATURE);
+    _outputBuffer.writeBits(_blockCrc, 32);
+    
     _outputBuffer.writeBit(0); /* not randomized */
     
     /* write inUse information */
@@ -133,9 +141,7 @@ class _Bzip2Compressor implements _Bzip2Coder {
       int currentLevel = Lens[table][0];
       _outputBuffer.writeBits(currentLevel, _LEVEL_BITS);
       
-      for (int i = 0; i < _alphaSize; i++) {
-        int nextLevel = Lens[table][i];
-        
+      for (int nextLevel in Lens[table]) {
         while (currentLevel < nextLevel) {
           _outputBuffer.writeBits(2, 2);
           currentLevel++;
@@ -152,40 +158,28 @@ class _Bzip2Compressor implements _Bzip2Coder {
     /* write symbols */
     for (int group = 0, bufferIndex = 0; group < _selectorCount; group++) {
       int table = _selectors[group];
-      int groupSize = min(_GROUP_SIZE, _buffer.length - bufferIndex);
+      int groupSize = min(_GROUP_SIZE, _compressedBlock.length - bufferIndex);
       
       for (int groupIndex = 0; groupIndex < groupSize; groupIndex++) {
-        int symbol = _buffer[bufferIndex++];
+        int symbol = _compressedBlock[bufferIndex++];
         _outputBuffer.writeBits(Codes[table][symbol], Lens[table][symbol]);
       }
     }
   }
   
   void _writeHeader() {
-    for (int byte in _BZIP_SIGNATURE) {
-      _outputBuffer.writeByte(byte);
-    }
+    _outputBuffer.writeBytes(_BZIP_SIGNATURE);
     _outputBuffer.writeByte('0'.codeUnitAt(0) + _blockSizeFactor);
   }
   
-  void _writeBlockHeader() {
-    for (int byte in _BLOCK_SIGNATURE) {
-      _outputBuffer.writeByte(byte);
-    }
-    _outputBuffer.writeBits(_blockCrc.getDigest(), 32);
-  }
-  
-  void _writeCompressedBlock(List<int> buffer) {
-    for (int byte in buffer) {
-      _outputBuffer.writeByte(byte);
-    }
-  }
-  
-  void _calculateBlockCrc(List<int> block) {
-    _blockCrc.reset();
+  int _calculateBlockCrc(List<int> block) {
+    _Bzip2Crc blockCrc = new _Bzip2Crc();
+    
     for (int symbol in block) {
-      _blockCrc.updateByte(symbol);
+      blockCrc.updateByte(symbol);
     }
+    
+    return blockCrc.getDigest();
   }
   
   void _writeFooter() {
@@ -228,25 +222,26 @@ class _Bzip2Compressor implements _Bzip2Coder {
     return result;
   }
   
-  List<int> _burrowsWheelerTransform(List<int> _buffer) {
+  List _burrowsWheelerTransform(List<int> _buffer) {
     List<int> y = _buffer.map((x) => x + 1).toList();
     String s = new String.fromCharCodes(y);
     SuffixArray suffixArray = new SuffixArray(s + s);
     List<int> sortedSuffixes = suffixArray.getSortedSuffixes();
     
+    int originPointer;
     List<int> result = new List<int>(_buffer.length);
     int resultIndex = 0;
     
     for (int b in sortedSuffixes) {
       if (b < _buffer.length) {
         if (b == 0) {
-          _originPointer = resultIndex;
+          originPointer = resultIndex;
         }
         result[resultIndex++] = _buffer[(b + _buffer.length - 1) % _buffer.length];
       }
     }
     
-    return result;
+    return [result, originPointer];
   }
   
   List<bool> _calculateInUse(List<int> _buffer) {
@@ -302,7 +297,7 @@ class _Bzip2Compressor implements _Bzip2Coder {
     return result;
   }
 
-  List<int> _rleEncode2(List<int> buffer) {
+  List<int> _rleEncode2(List<int> buffer, int alphaSize) {
     List<int> result = new List<int>(_MAX_BLOCK_SIZE + 2);
     int resultIndex = 0;
     int bufferIndex = 0;
@@ -327,13 +322,15 @@ class _Bzip2Compressor implements _Bzip2Coder {
       }
     }
     
-    result[resultIndex++] = _alphaSize - 1;
+    result[resultIndex++] = alphaSize - 1;
     
     result = result.sublist(0, resultIndex);
     return result;
   }
   
-  void _createHuffmanTables(List<int> _buffer) {
+  void _createHuffmanTables(List<int> _buffer, int alphaSize) {
+    List<List<int>> Freqs = create2dList(_TABLE_COUNT_MAX, _MAX_ALPHA_SIZE);
+    
     int totalSymbolCount = 0;
     List<int> symbolCounts = new List<int>.filled(_MAX_ALPHA_SIZE, 0);
     for (int value in _buffer) {
@@ -355,7 +352,7 @@ class _Bzip2Compressor implements _Bzip2Coder {
       while (currentCount < targetCount)
         currentCount += symbolCounts[groupEnd++];
       
-      Lens[table] = new List<int>.generate(_alphaSize, (i) => (groupStart <= i &&
+      Lens[table] = new List<int>.generate(alphaSize, (i) => (groupStart <= i &&
                                            i < groupEnd) ? 0 : 1);
       groupStart = groupEnd;
       remainingSymbols -= currentCount;
@@ -389,11 +386,11 @@ class _Bzip2Compressor implements _Bzip2Coder {
       }
       
       for (int table = 0; table < _tableCount; table++) {
-        for (int i = 0; i < _alphaSize; i++) {
+        for (int i = 0; i < alphaSize; i++) {
           if (Freqs[table][i] == 0)
             Freqs[table][i] = 1;
         }
-        _HuffmanEncoder encoder = new _HuffmanEncoder(_alphaSize, _MAX_HUFFMAN_LEN_FOR_ENCODING);
+        _HuffmanEncoder encoder = new _HuffmanEncoder(alphaSize, _MAX_HUFFMAN_LEN_FOR_ENCODING);
         encoder.generate(Freqs[table], Codes[table], Lens[table]);
       }
     }
