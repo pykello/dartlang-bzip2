@@ -23,8 +23,8 @@ class _Bzip2Compressor implements _Bzip2Coder {
   List<List<int>> Lens = create2dList(_TABLE_COUNT_MAX, _MAX_ALPHA_SIZE);
   List<List<int>> Freqs = create2dList(_TABLE_COUNT_MAX, _MAX_ALPHA_SIZE);
   List<List<int>> Codes = create2dList(_TABLE_COUNT_MAX, _MAX_ALPHA_SIZE);
-  List<int> selectors;
-  int _tableCount = 2;
+  List<int> _selectors;
+  int _tableCount;
   int _selectorCount;
 
   
@@ -119,7 +119,7 @@ class _Bzip2Compressor implements _Bzip2Coder {
     
     /* write table selectors */
     List<int> selectorsSymbols = new List<int>.generate(_TABLE_COUNT_MAX, (x)=>x);
-    List<int> selectorsEncoded = _mtf8Encode(selectors, selectorsSymbols);
+    List<int> selectorsEncoded = _mtf8Encode(_selectors, selectorsSymbols);
     
     for (int selectorCode in selectorsEncoded) {
       for (int i = 0; i < selectorCode; i++) {
@@ -151,7 +151,7 @@ class _Bzip2Compressor implements _Bzip2Coder {
     
     /* write symbols */
     for (int group = 0, bufferIndex = 0; group < _selectorCount; group++) {
-      int table = selectors[group];
+      int table = _selectors[group];
       int groupSize = min(_GROUP_SIZE, _buffer.length - bufferIndex);
       
       for (int groupIndex = 0; groupIndex < groupSize; groupIndex++) {
@@ -341,10 +341,10 @@ class _Bzip2Compressor implements _Bzip2Coder {
       totalSymbolCount++;
     }
     
-    _tableCount = 2;
+    _tableCount = 6;
     _selectorCount = (totalSymbolCount + _GROUP_SIZE - 1) ~/ _GROUP_SIZE;
     
-    selectors = new List<int>(_selectorCount);
+    _selectors = new List<int>(_selectorCount);
     
     int remainingSymbols = totalSymbolCount;
     int groupStart = 0;
@@ -365,6 +365,7 @@ class _Bzip2Compressor implements _Bzip2Coder {
       for (int group = 0, bufferIndex = 0; group < _selectorCount; group++) {
         int groupSize = min(_GROUP_SIZE, _buffer.length - bufferIndex);
         List<int> groupSymbols = _buffer.sublist(bufferIndex, bufferIndex + groupSize);
+        bufferIndex += groupSize;
         
         int bestTable = 0;
         int bestCost = 0xFFFFFFFF;
@@ -380,7 +381,7 @@ class _Bzip2Compressor implements _Bzip2Coder {
           }
         }
         
-        selectors[group] = bestTable;
+        _selectors[group] = bestTable;
         
         for (int symbol in groupSymbols) {
           Freqs[bestTable][symbol]++;
