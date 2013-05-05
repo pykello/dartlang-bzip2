@@ -54,7 +54,9 @@ class _Bzip2Compressor implements _Bzip2Coder {
       _buffer = _readBlock();
       _buffer = _rleEncode1(_buffer);
       _buffer = _burrowsWheelerTransform(_buffer);
-      _calculateInUse(_buffer);
+      _inUse = _calculateInUse(_buffer);
+      _inUse16 = _calculateInUse16(_inUse);
+      _alphaSize = _getAlphaSize(_inUse);
       _buffer = _mtf8Encode(_buffer);
       _buffer = _rleEncode2(_buffer);
       _buffer = _encodeBlock3(_buffer);      
@@ -64,7 +66,6 @@ class _Bzip2Compressor implements _Bzip2Coder {
       _writeFooter();
       _isDone = true;
     }
-    
     
     _inputSize = 0;
     _inputIndex = 0;
@@ -359,20 +360,27 @@ class _Bzip2Compressor implements _Bzip2Coder {
     return result;
   }
   
-  void _calculateInUse(List<int> _buffer) {
-    int numInUse = 0;
-    _inUse = new List<bool>.filled(256, false);
-    _inUse16 = new List<bool>.filled(16, false);
-    for (int byte in _buffer) {
-      _inUse[byte] = true;
+  List<bool> _calculateInUse(List<int> _buffer) {
+    List<bool> inUse = new List<bool>.filled(256, false);
+    for (int value in _buffer) {
+      inUse[value] = true;
     }
+    return inUse;
+  }
+  
+  List<bool> _calculateInUse16(List<bool> inUse) {
+    List<bool> inUse16 = new List<bool>.filled(16, false);
     for (int i = 0; i < 256; i++) {
-      if (_inUse[i]) {
-        _inUse16[i >> 4] = true;
-        numInUse++;
+      if (inUse[i]) {
+        inUse16[i >> 4] = true;
       }
     }
-    _alphaSize = numInUse + 2;
+    return inUse16;
+  }
+  
+  int _getAlphaSize(List<bool> inUse) {
+    int alphaSize = inUse.where((v) => v).length + 2;
+    return alphaSize;
   }
   
   List<int> _mtf8Encode(List<int> _buffer) {
