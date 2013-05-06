@@ -100,7 +100,7 @@ class _Bzip2Compressor implements _Bzip2Coder {
     
     List<int> blockRleEncoded2 = _rleEncode2(blockMtfEncoded, alphaSize);
     
-    _huffmanTables = _createHuffmanTables(blockRleEncoded2, alphaSize);
+    _huffmanTables = _calculateHuffmanTables(blockRleEncoded2, alphaSize);
     _selectors = _calculateSelectors(blockRleEncoded2, _huffmanTables);
     
     _compressedBlock = blockRleEncoded2;
@@ -169,9 +169,22 @@ class _Bzip2Compressor implements _Bzip2Coder {
     }
   }
   
+  void _writeFooter() {
+    for (int byte in _FINISH_SIGNATURE) {
+      _outputBuffer.writeByte(byte);
+    }
+    _outputBuffer.writeBits(_fileCrc.getDigest(), 32);
+  }
+  
   void _writeHeader() {
     _outputBuffer.writeBytes(_BZIP_SIGNATURE);
     _outputBuffer.writeByte('0'.codeUnitAt(0) + _blockSizeFactor);
+  }
+  
+  List<int> _readBlock() {
+    List<int> result =  _input.sublist(0, _inputSize);
+    _inputSize = 0;
+    return result;
   }
   
   int _calculateBlockCrc(List<int> block) {
@@ -182,19 +195,6 @@ class _Bzip2Compressor implements _Bzip2Coder {
     }
     
     return blockCrc.getDigest();
-  }
-  
-  void _writeFooter() {
-    for (int byte in _FINISH_SIGNATURE) {
-      _outputBuffer.writeByte(byte);
-    }
-    _outputBuffer.writeBits(_fileCrc.getDigest(), 32);
-  }
-  
-  List<int> _readBlock() {
-    List<int> result =  _input.sublist(0, _inputSize);
-    _inputSize = 0;
-    return result;
   }
   
   List<int> _rleEncode1(List<int> block) {
@@ -330,7 +330,7 @@ class _Bzip2Compressor implements _Bzip2Coder {
     return result;
   }
     
-  List _createHuffmanTables(List<int> block, int alphaSize) {
+  List _calculateHuffmanTables(List<int> block, int alphaSize) {
     /* initialize */
     List<List<_HuffmanCode>> huffmanTables = _initialHuffmanTables(block, alphaSize);
     int tableCount = huffmanTables.length;
@@ -368,14 +368,6 @@ class _Bzip2Compressor implements _Bzip2Coder {
     return selectors;
   }
   
-  List<int> _getGroupData(List<int> block, int group) {
-    int groupStart = group * _GROUP_SIZE;
-    int groupEnd = min(groupStart + _GROUP_SIZE, block.length);
-    List<int> groupSymbols = block.sublist(groupStart, groupEnd);
-    
-    return groupSymbols;
-  }
-  
   List<List<_HuffmanCode>> _initialHuffmanTables(List<int> _buffer, int alphaSize) {
     List<List<_HuffmanCode>> huffmanTables;
     int tableCount = _TABLE_COUNT_MAX;
@@ -409,6 +401,14 @@ class _Bzip2Compressor implements _Bzip2Coder {
     return huffmanTables;
   }
 
+  List<int> _getGroupData(List<int> block, int group) {
+    int groupStart = group * _GROUP_SIZE;
+    int groupEnd = min(groupStart + _GROUP_SIZE, block.length);
+    List<int> groupSymbols = block.sublist(groupStart, groupEnd);
+    
+    return groupSymbols;
+  }
+  
   int _selectHuffmanTable(List<int> groupData, List<List<_HuffmanCode>> huffmanTables) {
     int bestTable = 0;
     int bestCost = 0xFFFFFFFF;
