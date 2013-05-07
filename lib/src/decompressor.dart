@@ -22,7 +22,6 @@ class _Bzip2Decompressor implements _Bzip2Coder {
   
   bool _randomized;
   int _originPointer;
-  int _selectorCount;
   List<int> _selectors;
   List<_HuffmanDecoder> _huffmanDecoders; 
   List<int> _charCounters = new List<int>(256 + _MAX_BLOCK_SIZE);
@@ -141,7 +140,7 @@ class _Bzip2Decompressor implements _Bzip2Coder {
     
     _initializeMtfDecoder();
     _computeTableCount();
-    _computeSelectorList();
+    _selectors = _computeSelectorList();
     _initializeHuffmanDecoders();
     _decodeSymbols();
         
@@ -183,20 +182,17 @@ class _Bzip2Decompressor implements _Bzip2Coder {
           _tableCount, (int index) => new _HuffmanDecoder(_MAX_HUFFMAN_LEN, _MAX_ALPHA_SIZE));
   }
 
-  void _computeSelectorList() {
-    _selectorCount = _buffer.readBits(_SELECTOR_COUNT_BITS);
-    if (_selectorCount < 1 || _selectorCount > _SELECTOR_COUNT_MAX) {
+  List<int> _computeSelectorList() {
+    int selectorCount = _buffer.readBits(_SELECTOR_COUNT_BITS);
+    if (selectorCount < 1 || selectorCount > _SELECTOR_COUNT_MAX) {
       throw new StateError("invalid selector count");
     }
     
-    _selectors = new List<int>(_selectorCount);
+    List<int> selectors = new List<int>(selectorCount);
     
-    List<int> mtfPos = new List<int>(_TABLE_COUNT_MAX);
-    for (int i = 0; i < _tableCount; i++) {
-      mtfPos[i] = i;
-    }
+    List<int> mtfPos = new List<int>.generate(_TABLE_COUNT_MAX, (i) => i);
     
-    for (int i = 0; i < _selectorCount; i++) {
+    for (int i = 0; i < selectorCount; i++) {
       int j = 0;
       while (_buffer.readBit() == 1) {
         j++;
@@ -209,8 +205,10 @@ class _Bzip2Decompressor implements _Bzip2Coder {
         mtfPos[j] = mtfPos[j - 1];
       }
       mtfPos[0] = tmp;
-      _selectors[i] = tmp;
+      selectors[i] = tmp;
     }
+    
+    return selectors;
   }
   
   void _initializeHuffmanDecoders() {
@@ -251,7 +249,7 @@ class _Bzip2Decompressor implements _Bzip2Coder {
     while (true) {
       if (groupSize == 0)
       {
-        if (groupIndex >= _selectorCount) {
+        if (groupIndex >= _selectors.length) {
           throw new StateError("invalid group index");
         }
         groupSize = _GROUP_SIZE;
