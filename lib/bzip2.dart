@@ -14,7 +14,6 @@ part 'src/crc.dart';
 part 'src/decompressor.dart';
 part 'src/huffmandecoder.dart';
 part 'src/huffmanencoder.dart';
-part 'src/mtf8decoder.dart';
 
 abstract class _Bzip2Transformer extends 
     StreamEventTransformer<List<int>, List<int>> {
