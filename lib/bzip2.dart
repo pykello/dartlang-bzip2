@@ -3,7 +3,7 @@ library bzip2;
 import 'dart:io';
 import 'dart:async';
 import 'dart:math';
-import 'dart:typeddata';
+import 'dart:typed_data';
 import 'package:suffixarray/suffixarray.dart';
 
 part 'src/bitbuffer.dart';

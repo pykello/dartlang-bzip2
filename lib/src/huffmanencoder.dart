@@ -23,7 +23,7 @@ class _HuffmanEncoder {
     List<int> lens = new List<int>(_symbolCount);
     
     for (int i = 0; i < _symbolCount; i++) {
-      codes[i] = i | (max(freqs[i], 1) << NUM_BITS);
+      codes[i] = i | (max(freqs[i], 1).toInt() << NUM_BITS);
     }
     codes.sort();
           
