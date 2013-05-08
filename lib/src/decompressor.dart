@@ -188,27 +188,42 @@ class _Bzip2Decompressor implements _Bzip2Coder {
       throw new StateError("invalid selector count");
     }
     
-    List<int> selectors = new List<int>(selectorCount);
-    
-    List<int> mtfPos = new List<int>.generate(_TABLE_COUNT_MAX, (i) => i);
-    
+    List<int> mtfEncodedSelectorList = new List<int>(selectorCount);
     for (int i = 0; i < selectorCount; i++) {
-      int j = 0;
+      int mtfEncodedSelector = 0;
       while (_buffer.readBit() == 1) {
-        j++;
-        if (j > _tableCount) {
-          throw new StateError("error while parsing");
-        }
+        mtfEncodedSelector++;
       }
-      int tmp = mtfPos[j];
-      for (;j > 0; j--) {
-        mtfPos[j] = mtfPos[j - 1];
-      }
-      mtfPos[0] = tmp;
-      selectors[i] = tmp;
+      mtfEncodedSelectorList[i] = mtfEncodedSelector;
     }
     
-    return selectors;
+    List<int> selectorsSymbols = new List<int>.generate(_TABLE_COUNT_MAX, (x)=>x);
+    List<int> selectorList = _mtfDecode(mtfEncodedSelectorList, selectorsSymbols);
+    
+    for (int selector in selectorList) {
+      if (selector > _tableCount) {
+        throw new StateError("invalid selector");
+      }
+    }
+    
+    return selectorList;
+  }
+  
+  List<int> _mtfDecode(List<int> buffer, List<int> symbols) {
+    List<int> result = new List<int>(buffer.length);
+    List<int> mtf = new List<int>.from(symbols);
+    
+    for (int index = 0; index < buffer.length; index++) {
+      int symbolIndex = buffer[index];
+      result[index] = mtf[symbolIndex];
+      
+      for (int index = symbolIndex; index > 0; index--) {
+        mtf[index] = mtf[index - 1];
+      }
+      mtf[0] = result[index];
+    }
+    
+    return result;
   }
   
   void _initializeHuffmanDecoders() {
