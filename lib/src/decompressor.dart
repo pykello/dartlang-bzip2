@@ -6,24 +6,17 @@ const int _STATE_READ_SIGNATURES      = 1;
 const int _STATE_READ_BLOCK           = 2;
 const int _STATE_DECODE_BLOCK_1       = 3;
 const int _STATE_DECODE_BLOCK_2       = 4;
-const int _STATE_DECODE_BLOCK_2_RAND  = 5;
 const int _STATE_STREAM_END           = 6;
 const int _STATE_ERROR                = 7;
 
 class _Bzip2Decompressor implements _Bzip2Coder {
   int _state = _STATE_INIT;
   bool _noMoreData = false;
-  int _dicSize;
-  int _tableCount;
   int _blockSize;
-  int _alphaSize;
-  int _symbolsUsed;
   
-  bool _randomized;
   int _originPointer;
-  List<int> _selectors;
-  List<_HuffmanDecoder> _huffmanDecoders; 
   List<int> _charCounters = new List<int>(256 + _MAX_BLOCK_SIZE);
+  List<int> _huffmanBlock;
   List<int> _symbols;
   
   BitBuffer _buffer = new BitBuffer(_MAX_BYTES_REQUIRED);
@@ -61,7 +54,6 @@ class _Bzip2Decompressor implements _Bzip2Coder {
         break;
       case _STATE_DECODE_BLOCK_1:
       case _STATE_DECODE_BLOCK_2:
-      case _STATE_DECODE_BLOCK_2_RAND:
         result = true;
         break;
       default:
@@ -87,9 +79,6 @@ class _Bzip2Decompressor implements _Bzip2Coder {
       case _STATE_DECODE_BLOCK_2:
         _decodeBlock2();
         break;
-      case _STATE_DECODE_BLOCK_2_RAND:
-        _decodeBlock2Rand();
-        break;
       case _STATE_STREAM_END:
         break;
     }
@@ -101,8 +90,8 @@ class _Bzip2Decompressor implements _Bzip2Coder {
       throw new StateError("invalid file signature");
     }
     
-    _dicSize = (_buffer.readByte() - 0x30) * _BLOCK_SIZE_STEP;
-    if (_dicSize <= 0 || _dicSize > _MAX_BLOCK_SIZE) {
+    int dicSize = (_buffer.readByte() - 0x30) * _BLOCK_SIZE_STEP;
+    if (dicSize <= 0 || dicSize > _MAX_BLOCK_SIZE) {
       throw new StateError("invalid dic size");
     }
     
@@ -131,64 +120,95 @@ class _Bzip2Decompressor implements _Bzip2Coder {
   }
   
   void _readBlock() {
-    _randomized = (_buffer.readBit() == 1);
-    
-    _originPointer = _buffer.readBits(_ORIGIN_BIT_COUNT);
-    if (_originPointer >= _MAX_BLOCK_SIZE) {
-      throw new StateError("invalid origin pointer");
-    }
-    
-    _initializeSymbols();
-    _computeTableCount();
-    _selectors = _computeSelectorList();
-    _initializeHuffmanDecoders();
+    _readCompressedBlock();
     _decodeSymbols();
-        
-    if (_originPointer >= _blockSize) {
-      throw new StateError("block size and origin pointer don't match");
-    }
     
     _state = _STATE_DECODE_BLOCK_1;
   }
   
-  void _initializeSymbols() {
-    _symbolsUsed = 0;
-    _symbols = new List<int>(256);
+  void _readCompressedBlock() {
+    bool randomized = (_buffer.readBit() == 1);
+    if (randomized) {
+      throw new StateError("randomized mode is deprecated");
+    }
+    
+    int originPointer = _buffer.readBits(_ORIGIN_BIT_COUNT);
+    if (originPointer >= _MAX_BLOCK_SIZE) {
+      throw new StateError("invalid origin pointer");
+    }
+    
+    int symbolCount = 0;
+    List<int> symbols = new List<int>(256);
+    
     List<bool> inUse16 = new List<bool>(16);
+    List<bool> inUse = new List<bool>.filled(256, false);
+    
     for (int i = 0; i < 16; i++) {
       inUse16[i] = (_buffer.readBit() == 1);
     }
+    
     for (int i = 0; i < 256; i++) {
-      if (inUse16[i >> 4])
-      {
-        if (_buffer.readBit() == 1) {
-          _symbols[_symbolsUsed] = i;
-          _symbolsUsed++;
+      if (inUse16[i >> 4]) {
+        inUse[i] = (_buffer.readBit() == 1);
+        if (inUse[i]) {
+          symbols[symbolCount++] = i;
         }
       }
     }
-    if (_symbolsUsed == 0) {
-      throw new StateError("numInUse cannot be zero");
+    
+    if (symbolCount == 0) {
+      throw new StateError("symbols used cannot be zero");
     }
-    _symbols = _symbols.sublist(0, _symbolsUsed);
-    _alphaSize = _symbolsUsed + 2;
-  }
-
-  void _computeTableCount() {
-    _tableCount = _buffer.readBits(_TABLE_COUNT_BITS);
-    if (_tableCount < _TABLE_COUNT_MIN || _tableCount > _TABLE_COUNT_MAX) {
+    
+    int tableCount = _buffer.readBits(_TABLE_COUNT_BITS);
+    if (tableCount < _TABLE_COUNT_MIN || tableCount > _TABLE_COUNT_MAX) {
       throw new StateError("invalid table count");
     }
-    _huffmanDecoders = new List<_HuffmanDecoder>.generate(
-          _tableCount, (int index) => new _HuffmanDecoder(_MAX_HUFFMAN_LEN, _MAX_ALPHA_SIZE));
-  }
-
-  List<int> _computeSelectorList() {
+    
     int selectorCount = _buffer.readBits(_SELECTOR_COUNT_BITS);
     if (selectorCount < 1 || selectorCount > _SELECTOR_COUNT_MAX) {
       throw new StateError("invalid selector count");
     }
     
+    List<int> selectors = _readSelectors(selectorCount, tableCount);
+    List<_HuffmanDecoder> huffmanDecoders = _readHuffmanTables(tableCount, 
+                                                                symbolCount);
+    
+    List<int> huffmanBlock = _readHuffmanBlock(selectors, huffmanDecoders, 
+                                               symbolCount);
+    
+    _originPointer = originPointer;
+    _symbols = symbols;
+    _huffmanBlock = huffmanBlock;
+  }
+  
+  List<_HuffmanDecoder> _readHuffmanTables(int tableCount, int symbolCount) {
+    List<_HuffmanDecoder> _huffmanDecoders = new List<_HuffmanDecoder>(tableCount);
+    
+    for(int table = 0; table < tableCount; table++) {
+      List<int> lengthArray = new List<int>.filled(_MAX_ALPHA_SIZE, 0);
+      int currentLevel = _buffer.readBits(_LEVEL_BITS);
+      
+      for (int symbol = 0; symbol < symbolCount + 2; symbol++) {
+        while (_buffer.readBit() == 1) {
+          currentLevel += 1 - (_buffer.readBit() * 2);
+        }
+        if (currentLevel < 1 || currentLevel > _MAX_HUFFMAN_LEN) {
+          throw new StateError("invalid len");
+        }
+        lengthArray[symbol] = currentLevel;
+      }
+      
+      _huffmanDecoders[table] = new _HuffmanDecoder(_MAX_HUFFMAN_LEN, _MAX_ALPHA_SIZE); 
+      if (!_huffmanDecoders[table].setCodeLengths(lengthArray)) {
+        throw new StateError("invalid len array");
+      }
+    }
+    
+    return _huffmanDecoders;
+  }
+
+  List<int> _readSelectors(int selectorCount, int tableCount) {
     List<int> mtfEncodedSelectorList = new List<int>(selectorCount);
     for (int i = 0; i < selectorCount; i++) {
       int mtfEncodedSelector = 0;
@@ -202,12 +222,42 @@ class _Bzip2Decompressor implements _Bzip2Coder {
     List<int> selectorList = _mtfDecode(mtfEncodedSelectorList, selectorsSymbols);
     
     for (int selector in selectorList) {
-      if (selector > _tableCount) {
+      if (selector > tableCount) {
         throw new StateError("invalid selector");
       }
     }
     
     return selectorList;
+  }
+  
+  List<int> _readHuffmanBlock(List<int> _selectors, 
+      List<_HuffmanDecoder> _huffmanDecoders, 
+      int symbolCount) {
+    List<int> result = new List<int>(_GROUP_SIZE * _selectors.length + 2);
+    int resultSize = 0;
+    
+    for (int group = 0; group < _selectors.length; group++) {
+      bool isLastGroup = (group + 1 == _selectors.length);
+      int selector = _selectors[group];
+      _HuffmanDecoder huffmanDecoder = _huffmanDecoders[selector];
+      
+      for (int i = 0; i < _GROUP_SIZE; i++) {
+        int symbol = huffmanDecoder.decodeSymbol(_buffer);
+        
+        if (symbol <= symbolCount) {
+          result[resultSize++] = symbol;
+        }
+        else if (symbol == symbolCount + 1 && isLastGroup) {
+          break;
+        }
+        else {
+          throw new StateError("invalid next symbol");
+        }
+      }
+    }
+    
+    result = result.sublist(0, resultSize);
+    return result;
   }
   
   List<int> _mtfDecode(List<int> buffer, List<int> symbols) {
@@ -224,59 +274,6 @@ class _Bzip2Decompressor implements _Bzip2Coder {
       mtf[0] = result[index];
     }
     
-    return result;
-  }
-  
-  void _initializeHuffmanDecoders() {
-    for(int t = 0; t < _tableCount; t++)
-    {
-      List<int> lens = new List<int>.filled(_MAX_ALPHA_SIZE, 0);
-      int len = _buffer.readBits(_LEVEL_BITS);
-      for (int i = 0; i < _alphaSize; i++)
-      {
-        for (;;)
-        {
-          if (len < 1 || len > _MAX_HUFFMAN_LEN) {
-            throw new StateError("invalid len");
-          }
-          if (_buffer.readBit() == 0) {
-            break;
-          }
-          len += 1 - (_buffer.readBit() * 2);
-        }
-        lens[i] = len;
-      }
-      if (!_huffmanDecoders[t].setCodeLengths(lens)) {
-        throw new StateError("invalid len array");
-      }
-    }
-  }
-  
-  List<int> _huffmanDecode() {
-    List<int> result = new List<int>(_GROUP_SIZE * _selectors.length + 2);
-    int resultSize = 0;
-    
-    for (int group = 0; group < _selectors.length; group++) {
-      bool isLastGroup = (group + 1 == _selectors.length);
-      int selector = _selectors[group];
-      _HuffmanDecoder huffmanDecoder = _huffmanDecoders[selector];
-      
-      for (int i = 0; i < _GROUP_SIZE; i++) {
-        int symbol = huffmanDecoder.decodeSymbol(_buffer);
-        
-        if (symbol <= _symbolsUsed) {
-          result[resultSize++] = symbol;
-        }
-        else if (symbol == _symbolsUsed + 1 && isLastGroup) {
-          break;
-        }
-        else {
-          throw new StateError("invalid next symbol");
-        }
-      }
-    }
-    
-    result = result.sublist(0, resultSize);
     return result;
   }
   
@@ -310,8 +307,7 @@ class _Bzip2Decompressor implements _Bzip2Coder {
   }
   
   void _decodeSymbols() {
-    List<int> huffmanDecodedBlock = _huffmanDecode();
-    List<int> rleDecodedBlock = _rleDecode2(huffmanDecodedBlock);
+    List<int> rleDecodedBlock = _rleDecode2(_huffmanBlock);
     List<int> mtfDecodedBlock = _mtfDecode(rleDecodedBlock, _symbols);
     for (int i = 0; i < 256; i ++) 
       _charCounters[i] = 0;
@@ -323,6 +319,10 @@ class _Bzip2Decompressor implements _Bzip2Coder {
   }
 
   void _decodeBlock1() {
+    if (_originPointer >= _blockSize) {
+      throw new StateError("block size and origin pointer don't match");
+    }
+    
     int sum = 0;
     for (int i = 0; i < 256; i++) {
       sum += _charCounters[i];
@@ -333,7 +333,7 @@ class _Bzip2Decompressor implements _Bzip2Coder {
       _charCounters[256 + _charCounters[_charCounters[256 + i] & 0xFF]++] |= (i << 8);
     } while(++i < _blockSize);
     
-    _state = (_randomized ? _STATE_DECODE_BLOCK_2_RAND : _STATE_DECODE_BLOCK_2);
+    _state = _STATE_DECODE_BLOCK_2;
   }
   
   void _decodeBlock2() {
@@ -370,10 +370,6 @@ class _Bzip2Decompressor implements _Bzip2Coder {
     _endOutput();
         
     _state = _STATE_READ_SIGNATURES;
-  }
-  
-  void _decodeBlock2Rand() {
-    throw new StateError("deprecated randomized files");
   }
   
   void _beginOutput() {
