@@ -222,7 +222,7 @@ class _Bzip2Decompressor implements _Bzip2Coder {
     List<int> selectorList = _mtfDecode(mtfEncodedSelectorList, selectorsSymbols);
     
     for (int selector in selectorList) {
-      if (selector > tableCount) {
+      if (selector >= tableCount) {
         throw new StateError("invalid selector");
       }
     }
