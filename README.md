@@ -1,4 +1,5 @@
 #Bzip2 Compression/Decompression Library for Dart
+[![Build Status](https://drone.io/github.com/pykello/dartlang-bzip2/status.png)](https://drone.io/github.com/pykello/dartlang-bzip2/latest)
 
 The goal of this library is to implement [bzip2](http://www.bzip.org/) compression/decompression algorithms for [dartlang](http://www.dartlang.org/).
 
