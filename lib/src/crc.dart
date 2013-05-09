@@ -2,8 +2,7 @@ part of bzip2;
 
 const int _BZIP2_CRC_POLY = 0x04c11db7;
 
-class _Bzip2Crc
-{
+class _Bzip2Crc {
   int _value;
   List<int> _crcTable = new List<int>(256);
   
@@ -25,8 +24,7 @@ class _Bzip2Crc
   }
   
   void _initCrcTable() {
-    for (int i = 0; i < 256; i++)
-    {
+    for (int i = 0; i < 256; i++) {
       int r = (i << 24) & 0xFFFFFFFF;
       for (int j = 8; j > 0; j--) {
         int sr = (r << 1) & 0xFFFFFFFF;
@@ -37,8 +35,7 @@ class _Bzip2Crc
   }
 }
 
-class _Bzip2CombinedCrc
-{
+class _Bzip2CombinedCrc {
   int _value;
 
   _Bzip2CombinedCrc() {
