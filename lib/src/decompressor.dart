@@ -8,23 +8,26 @@ const int _STATE_STREAM_END           = 3;
 const int _STATE_ERROR                = 4;
 
 class _Bzip2Decompressor implements _Bzip2Coder {
-  int _state = _STATE_INIT;
-  bool _noMoreData = false;
-  int _blockSize;
   
+  /* decompressor state */
+  int _state = _STATE_INIT;
+  bool _checkCrc;
+  
+  /* input state */
+  BitBuffer _buffer = new BitBuffer(_MAX_BYTES_REQUIRED);
+  bool _noMoreData = false;
+  _Bzip2CombinedCrc _fileCrc = new _Bzip2CombinedCrc();
+  
+  /* output state */
+  int _outputIndex;
+  List<int> _output = [];
+  
+  /* decompressed block state */
+  int _expectedBlockCrc;
   int _originPointer;
   List<int> _charCounters = new List<int>(256 + _MAX_BLOCK_SIZE);
   List<int> _huffmanBlock;
   List<int> _symbols;
-  
-  BitBuffer _buffer = new BitBuffer(_MAX_BYTES_REQUIRED);
-  int _outputIndex;
-  List<int> _output = [];
-  
-  bool _checkCrc;
-  _Bzip2Crc _crcCoder = new _Bzip2Crc();
-  _Bzip2CombinedCrc _combinedCrc = new _Bzip2CombinedCrc();
-  int _expectedBlockCrc;
   
   _Bzip2Decompressor(this._checkCrc);
   
@@ -98,7 +101,7 @@ class _Bzip2Decompressor implements _Bzip2Coder {
     
     /* file ended ? */
     else if(_listsMatch(signature, _FINISH_SIGNATURE)) {
-      if (_checkCrc && _combinedCrc.getDigest() != crc) {
+      if (_checkCrc && _fileCrc.getDigest() != crc) {
         throw new StateError("file crc failed");
       }
       
@@ -120,7 +123,7 @@ class _Bzip2Decompressor implements _Bzip2Coder {
         throw new StateError("block crc failed");
       }
       
-      _combinedCrc.update(blockCrc);
+      _fileCrc.update(blockCrc);
     }
     
     _state = _STATE_READ_SIGNATURES;
