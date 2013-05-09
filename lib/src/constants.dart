@@ -1,8 +1,10 @@
 part of bzip2;
 
-final List<int> _BZIP_SIGNATURE       = [0x42, 0x5a, 0x68];
-final List<int> _FINISH_SIGNATURE     = [0x17, 0x72, 0x45, 0x38, 0x50, 0x90];
-final List<int> _BLOCK_SIGNATURE      = [0x31, 0x41, 0x59, 0x26, 0x53, 0x59];
+const int _BZIP_SIGNATURE             = 0x425a68;
+const int _FINISH_SIGNATURE_HIGH      = 0x177245;
+const int _FINISH_SIGNATURE_LOW       = 0x385090;
+const int _BLOCK_SIGNATURE_HIGH       = 0x314159;
+const int _BLOCK_SIGNATURE_LOW        = 0x265359;
 
 const int _MAX_BYTES_REQUIRED          = 1048576;
 const int _BLOCK_SIZE_STEP             = 100000;

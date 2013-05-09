@@ -25,7 +25,6 @@ class _Bzip2Decompressor implements _Bzip2Coder {
   /* decompressed block state */
   int _expectedBlockCrc;
   int _originPointer;
-  List<int> _charCounters = new List<int>(256 + _MAX_BLOCK_SIZE);
   List<int> _huffmanBlock;
   List<int> _symbols;
   
@@ -76,8 +75,8 @@ class _Bzip2Decompressor implements _Bzip2Coder {
   }
   
   void _readHeaders() {
-    List<int> signature = _buffer.readBytes(3);
-    if (!_listsMatch(signature, _BZIP_SIGNATURE)) {
+    int signature = _buffer.readBits(24);
+    if (signature != _BZIP_SIGNATURE) {
       throw new StateError("invalid file signature");
     }
     
@@ -90,23 +89,25 @@ class _Bzip2Decompressor implements _Bzip2Coder {
   }
   
   void _readSignatures() {
-    List<int> signature = _buffer.readBytes(6);
+    int sigHigh = _buffer.readBits(24);
+    int sigLow = _buffer.readBits(24);
     int crc = _buffer.readBits(32);
     
     /* new block ? */
-    if (_listsMatch(signature, _BLOCK_SIGNATURE)) {
+    if (sigHigh == _BLOCK_SIGNATURE_HIGH && sigLow == _BLOCK_SIGNATURE_LOW) {
       _expectedBlockCrc = crc;
       _state = _STATE_READ_BLOCK; 
     }
     
     /* file ended ? */
-    else if(_listsMatch(signature, _FINISH_SIGNATURE)) {
+    else if(sigHigh == _FINISH_SIGNATURE_HIGH && sigLow == _FINISH_SIGNATURE_LOW) {
       if (_checkCrc && _fileCrc.getDigest() != crc) {
         throw new StateError("file crc failed");
       }
-      
       _state = _STATE_STREAM_END;
     }
+    
+    /* invalid signature ? */
     else {
       throw new StateError("invalid block signature");
     }
@@ -140,22 +141,23 @@ class _Bzip2Decompressor implements _Bzip2Coder {
       throw new StateError("invalid origin pointer");
     }
     
-    int symbolCount = 0;
-    List<int> symbols = new List<int>(256);
-    
     List<bool> inUse16 = new List<bool>(16);
-    List<bool> inUse = new List<bool>.filled(256, false);
-    
     for (int i = 0; i < 16; i++) {
       inUse16[i] = (_buffer.readBit() == 1);
     }
     
+    List<bool> inUse = new List<bool>.filled(256, false);
     for (int i = 0; i < 256; i++) {
       if (inUse16[i >> 4]) {
         inUse[i] = (_buffer.readBit() == 1);
-        if (inUse[i]) {
-          symbols[symbolCount++] = i;
-        }
+      }
+    }
+    
+    int symbolCount = 0;
+    List<int> symbols = new List<int>(256);
+    for (int i = 0; i < 256; i++) {
+      if (inUse[i]) {
+        symbols[symbolCount++] = i;
       }
     }
     
@@ -196,9 +198,11 @@ class _Bzip2Decompressor implements _Bzip2Coder {
         while (_buffer.readBit() == 1) {
           currentLevel += 1 - (_buffer.readBit() * 2);
         }
+        
         if (currentLevel < 1 || currentLevel > _MAX_HUFFMAN_LEN) {
           throw new StateError("invalid len");
         }
+        
         lengthArray[symbol] = currentLevel;
       }
       
@@ -213,11 +217,13 @@ class _Bzip2Decompressor implements _Bzip2Coder {
 
   List<int> _readSelectors(int selectorCount, int tableCount) {
     List<int> mtfEncodedSelectorList = new List<int>(selectorCount);
+    
     for (int i = 0; i < selectorCount; i++) {
       int mtfEncodedSelector = 0;
       while (_buffer.readBit() == 1) {
         mtfEncodedSelector++;
       }
+      
       mtfEncodedSelectorList[i] = mtfEncodedSelector;
     }
     
@@ -379,16 +385,4 @@ class _Bzip2Decompressor implements _Bzip2Coder {
     result = result.sublist(0, resultSize);
     return result;
   }
-}
-
-bool _listsMatch(List<int> a, List<int> b) {
-  if (a.length != b.length) {
-    return false;
-  }
-  for (int i = 0; i < a.length; i++) {
-    if (a[i] != b[i]) {
-      return false;
-    }
-  }
-  return true;
 }

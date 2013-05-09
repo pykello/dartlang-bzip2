@@ -107,7 +107,8 @@ class _Bzip2Compressor implements _Bzip2Coder {
   }
   
   void _writeCompressedBlock() {
-    _outputBuffer.writeBytes(_BLOCK_SIGNATURE);
+    _outputBuffer.writeBits(_BLOCK_SIGNATURE_HIGH, 24);
+    _outputBuffer.writeBits(_BLOCK_SIGNATURE_LOW, 24);
     _outputBuffer.writeBits(_blockCrc, 32);
     
     _outputBuffer.writeBit(0); /* not randomized */
@@ -170,14 +171,13 @@ class _Bzip2Compressor implements _Bzip2Coder {
   }
   
   void _writeFooter() {
-    for (int byte in _FINISH_SIGNATURE) {
-      _outputBuffer.writeByte(byte);
-    }
+    _outputBuffer.writeBits(_FINISH_SIGNATURE_HIGH, 24);
+    _outputBuffer.writeBits(_FINISH_SIGNATURE_LOW, 24);
     _outputBuffer.writeBits(_fileCrc.getDigest(), 32);
   }
   
   void _writeHeader() {
-    _outputBuffer.writeBytes(_BZIP_SIGNATURE);
+    _outputBuffer.writeBits(_BZIP_SIGNATURE, 24);
     _outputBuffer.writeByte('0'.codeUnitAt(0) + _blockSizeFactor);
   }
   
