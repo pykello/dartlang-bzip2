@@ -5,8 +5,9 @@ import 'dart:async';
 import 'dart:io';
 
 void main() {
-  List<String> decompressTests = ['random.1', 'random.2', 'pg1399.txt', 'pg689.txt', 'empty'];
-  List<String> compressTests = ['random.1', 'random.2', 'empty'];
+  List<String> decompressTests = ['random.1', 'random.2', 'repeat.1', 
+                                  'pg1399.txt', 'pg689.txt', 'empty'];
+  List<String> compressTests = ['random.1', 'random.2', 'repeat.1', 'empty'];
   String testDir = Directory.current.path + "/test";
   
   testBitBuffer();
