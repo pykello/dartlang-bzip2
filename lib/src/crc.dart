@@ -58,3 +58,13 @@ class _Bzip2CombinedCrc
     return _value ; 
   }
 }
+
+int _calculateBlockCrc(List<int> block) {
+  _Bzip2Crc blockCrc = new _Bzip2Crc();
+  
+  for (int symbol in block) {
+    blockCrc.updateByte(symbol);
+  }
+  
+  return blockCrc.getDigest();
+}

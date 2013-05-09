@@ -4,10 +4,8 @@ part of bzip2;
 const int _STATE_INIT                 = 0;
 const int _STATE_READ_SIGNATURES      = 1;
 const int _STATE_READ_BLOCK           = 2;
-const int _STATE_DECODE_BLOCK_1       = 3;
-const int _STATE_DECODE_BLOCK_2       = 4;
-const int _STATE_STREAM_END           = 6;
-const int _STATE_ERROR                = 7;
+const int _STATE_STREAM_END           = 3;
+const int _STATE_ERROR                = 4;
 
 class _Bzip2Decompressor implements _Bzip2Coder {
   int _state = _STATE_INIT;
@@ -26,7 +24,7 @@ class _Bzip2Decompressor implements _Bzip2Coder {
   bool _checkCrc;
   _Bzip2Crc _crcCoder = new _Bzip2Crc();
   _Bzip2CombinedCrc _combinedCrc = new _Bzip2CombinedCrc();
-  int _blockCrc;
+  int _expectedBlockCrc;
   
   _Bzip2Decompressor(this._checkCrc);
   
@@ -52,10 +50,6 @@ class _Bzip2Decompressor implements _Bzip2Coder {
       case _STATE_READ_BLOCK:
         result = ((_noMoreData && !_buffer.isEmpty()) || _buffer.isFull());
         break;
-      case _STATE_DECODE_BLOCK_1:
-      case _STATE_DECODE_BLOCK_2:
-        result = true;
-        break;
       default:
         result = false;
     }
@@ -71,13 +65,7 @@ class _Bzip2Decompressor implements _Bzip2Coder {
         _readSignatures();
         break;
       case _STATE_READ_BLOCK:
-        _readBlock();
-        break;
-      case _STATE_DECODE_BLOCK_1:
-        _decodeBlock1();
-        break;
-      case _STATE_DECODE_BLOCK_2:
-        _decodeBlock2();
+        _decompressBlock();
         break;
       case _STATE_STREAM_END:
         break;
@@ -101,17 +89,19 @@ class _Bzip2Decompressor implements _Bzip2Coder {
   void _readSignatures() {
     List<int> signature = _buffer.readBytes(6);
     int crc = _buffer.readBits(32);
+    
+    /* new block ? */
     if (_listsMatch(signature, _BLOCK_SIGNATURE)) {
-      if (_checkCrc) {
-        _blockCrc = crc;
-        _combinedCrc.update(_blockCrc);
-      }
+      _expectedBlockCrc = crc;
       _state = _STATE_READ_BLOCK; 
     }
+    
+    /* file ended ? */
     else if(_listsMatch(signature, _FINISH_SIGNATURE)) {
       if (_checkCrc && _combinedCrc.getDigest() != crc) {
-        throw new StateError("file CRC failed");
+        throw new StateError("file crc failed");
       }
+      
       _state = _STATE_STREAM_END;
     }
     else {
@@ -119,11 +109,21 @@ class _Bzip2Decompressor implements _Bzip2Coder {
     }
   }
   
-  void _readBlock() {
+  void _decompressBlock() {
     _readCompressedBlock();
-    _decodeSymbols();
     
-    _state = _STATE_DECODE_BLOCK_1;
+    _output = _decodeHuffmanBlock(_huffmanBlock, _symbols);
+    
+    if (_checkCrc) {
+      int blockCrc = _calculateBlockCrc(_output);
+      if (blockCrc != _expectedBlockCrc) {
+        throw new StateError("block crc failed");
+      }
+      
+      _combinedCrc.update(blockCrc);
+    }
+    
+    _state = _STATE_READ_SIGNATURES;
   }
   
   void _readCompressedBlock() {
@@ -260,6 +260,15 @@ class _Bzip2Decompressor implements _Bzip2Coder {
     return result;
   }
   
+  List<int> _decodeHuffmanBlock(List<int> huffmanBlock, List<int> symbols) {
+    List<int> rle2DecodedBlock = _rleDecode2(huffmanBlock);
+    List<int> mtfDecodedBlock = _mtfDecode(rle2DecodedBlock, symbols);
+    List<int> bwtDecodedBlock = _bwtDecode(mtfDecodedBlock);
+    List<int> rle1DecodedBlock = _rleDecode1(bwtDecodedBlock);
+    
+    return rle1DecodedBlock;
+  }
+  
   List<int> _mtfDecode(List<int> buffer, List<int> symbols) {
     List<int> result = new List<int>(buffer.length);
     List<int> mtf = new List<int>.from(symbols);
@@ -306,97 +315,66 @@ class _Bzip2Decompressor implements _Bzip2Coder {
     return result;
   }
   
-  void _decodeSymbols() {
-    List<int> rleDecodedBlock = _rleDecode2(_huffmanBlock);
-    List<int> mtfDecodedBlock = _mtfDecode(rleDecodedBlock, _symbols);
-    for (int i = 0; i < 256; i ++) 
-      _charCounters[i] = 0;
-    _blockSize = 0;
-    for (int symbol in mtfDecodedBlock) {
-      _charCounters[symbol]++;
-      _charCounters[256 + _blockSize++] = symbol;
-    }
-  }
-
-  void _decodeBlock1() {
-    if (_originPointer >= _blockSize) {
-      throw new StateError("block size and origin pointer don't match");
+  List<int> _bwtDecode(List<int> block) {
+    List<int> charCounters = new List<int>.filled(256, 0);
+    for (int symbol in block) {
+      charCounters[symbol]++;
     }
     
-    int sum = 0;
-    for (int i = 0; i < 256; i++) {
-      sum += _charCounters[i];
-      _charCounters[i] = sum - _charCounters[i];
+    List<int> nextIndex = new List<int>(256);
+    nextIndex[0] = 0;
+    for (int i = 1; i < 256; i++) {
+      nextIndex[i] = nextIndex[i - 1] + charCounters[i - 1];
     }
-    int i = 0;
-    do {
-      _charCounters[256 + _charCounters[_charCounters[256 + i] & 0xFF]++] |= (i << 8);
-    } while(++i < _blockSize);
     
-    _state = _STATE_DECODE_BLOCK_2;
+    List<int> sorted = new List<int>(block.length);
+    for (int i = 0; i < block.length; i++) {
+      int symbol = block[i];
+      sorted[nextIndex[symbol]++] = i;
+    }
+    
+    List<int> result = new List<int>(block.length);
+    int currentIndex = sorted[_originPointer];
+    for (int i = 0; i < block.length; i++) {
+      result[i] = block[currentIndex];
+      currentIndex = sorted[currentIndex];
+    }
+    
+    return result;
   }
   
-  void _decodeBlock2() {
-    int idx = _charCounters[256 + _originPointer] >> 8;
-    int tPos = _charCounters[256 + idx];
-    int prevByte = (tPos & 0xFF);
-    int numReps = 0;
+  List<int> _rleDecode1(List<int> block) {
+    List<int> result = new List<int>(_MAX_BLOCK_SIZE);
+    int resultSize = 0;
+    int lastSymbol = 0;
+    int repeatCount = 0;
     
-    int remainingSymbols = _blockSize;
-    List<int> bwt = _charCounters.sublist(256, 256 + _blockSize).map((x) => (x >> 8)).toList();
-    
-    _beginOutput();
-    
-    do {
-      int b = (tPos & 0xFF);
-      tPos = _charCounters[256 + (tPos >> 8)];
-      
-      if (numReps == _RLE_MODE_REP_SIZE)
-      {
-        for (; b > 0; b--) {
-          _writeOutput(prevByte);
-        }
-        numReps = 0;
-        continue;
+    for (int symbol in block) {
+      /* make sure we have enough room */
+      if (result.length < resultSize + 256) {
+        List<int> newResult = new List<int>(result.length * 2);
+        newResult.setRange(0, result.length, result);
+        result = newResult;
       }
-      if (b != prevByte)
-        numReps = 0;
-      numReps++;
-      prevByte = b;
-      _writeOutput(b);
       
-    } while(--remainingSymbols != 0);
+      /* rle sequence ? */
+      if (repeatCount == _RLE_MODE_REP_SIZE) {
+        for (int i = 0; i < symbol; i++) {
+          result[resultSize++] = lastSymbol;
+        }
+        repeatCount = 0;
+        lastSymbol = -1;
+      }
+      /* symbol ? */
+      else {
+        result[resultSize++] = symbol;
+        repeatCount = (symbol == lastSymbol) ? repeatCount + 1 : 1;
+        lastSymbol = symbol;
+      }
+    }
     
-    _endOutput();
-        
-    _state = _STATE_READ_SIGNATURES;
-  }
-  
-  void _beginOutput() {
-    _outputIndex = 0;
-    _output = new Uint8List(_MAX_BLOCK_SIZE);
-    if (_checkCrc) {
-      _crcCoder.reset();
-    }
-  }
-  
-  void _writeOutput(int byte) {
-    if (_outputIndex == _output.length) {
-      Uint8List newOutput = new Uint8List(_output.length * 2);
-      newOutput.setRange(0, _output.length, _output);
-      _output = newOutput;
-    }
-    _output[_outputIndex++] = byte;
-    if (_checkCrc) {
-      _crcCoder.updateByte(byte);
-    }
-  }
-  
-  void _endOutput() {
-    _output = _output.sublist(0, _outputIndex);
-    if (_checkCrc && _crcCoder.getDigest() != _blockCrc) {
-      throw new StateError("block CRC failed");
-    }
+    result = result.sublist(0, resultSize);
+    return result;
   }
 }
 

@@ -187,16 +187,6 @@ class _Bzip2Compressor implements _Bzip2Coder {
     return result;
   }
   
-  int _calculateBlockCrc(List<int> block) {
-    _Bzip2Crc blockCrc = new _Bzip2Crc();
-    
-    for (int symbol in block) {
-      blockCrc.updateByte(symbol);
-    }
-    
-    return blockCrc.getDigest();
-  }
-  
   List<int> _rleEncode1(List<int> block) {
     List<int> result = new List<int>(_MAX_BYTES_REQUIRED);
     int resultIndex = 0;
