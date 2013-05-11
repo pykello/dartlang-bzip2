@@ -1,11 +1,27 @@
 part of bzip2;
 
-const int kMaxLen = 16;
-const int NUM_BITS = 10;
-const int MASK = ((1 << NUM_BITS) - 1);
-
-const int NUM_COUNTERS = 64;
-
+class _HuffmanSubtree implements Comparable<_HuffmanSubtree> {
+  List<int> symbols;
+  int weight;
+  _HuffmanSubtree(this.symbols, this.weight);
+  
+  int compareTo(_HuffmanSubtree other) {
+    int result = weight.compareTo(other.weight);
+    if (result == 0) {
+      result = symbols[0].compareTo(other.symbols[0]);
+    }
+    return result;
+  }
+  
+  _HuffmanSubtree merge(_HuffmanSubtree other) {
+    int mergedWeight = weight + other.weight;
+    List<int> mergedSymbols = new List<int>.from(symbols)
+                                  ..addAll(other.symbols)
+                                  ..sort();
+    
+    return new _HuffmanSubtree(mergedSymbols, mergedWeight);
+  }
+}
 
 class _HuffmanCode {
   int code, len;
@@ -13,76 +29,83 @@ class _HuffmanCode {
 }
 
 class _HuffmanEncoder {
-  int _symbolCount;
   int maxLen;
   
-  _HuffmanEncoder(this._symbolCount, this.maxLen);
+  _HuffmanEncoder(int this.maxLen);
   
   List<_HuffmanCode> generate(List<int> freqs) {
-    List<int> codes = new List<int>(_symbolCount);
-    List<int> lens = new List<int>(_symbolCount);
+    List<int> symbolLength = _getLengths(freqs);
+    List<int> symbolCode = _getCodes(symbolLength);
     
-    for (int i = 0; i < _symbolCount; i++) {
-      codes[i] = i | (max(freqs[i], 1).toInt() << NUM_BITS);
+    List<_HuffmanCode> huffmanCodes = new List<_HuffmanCode>(freqs.length);
+    for (int symbol = 0; symbol < freqs.length; symbol++) {
+      huffmanCodes[symbol] = new _HuffmanCode(symbolCode[symbol], symbolLength[symbol]);
     }
-    codes.sort();
-          
-    int b, e, i;
-    
-    i = b = e = 0;
-    do
-    {
-      int n, m, freq;
-      n = (i != _symbolCount && (b == e || (codes[i] >> NUM_BITS) <= (codes[b] >> NUM_BITS))) ? i++ : b++;
-      freq = (codes[n] & ~MASK);
-      codes[n] = (codes[n] & MASK) | (e << NUM_BITS);
-      m = (i != _symbolCount && (b == e || (codes[i] >> NUM_BITS) <= (codes[b] >> NUM_BITS))) ? i++ : b++;
-      freq += (codes[m] & ~MASK);
-      codes[m] = (codes[m] & MASK) | (e << NUM_BITS);
-      codes[e] = (codes[e] & MASK) | freq;
-      e++;
-    }
-    while (_symbolCount - e > 1);
-    
-    List<int> lenCounters = new List<int>.filled(kMaxLen + 1, 0);
-    codes[--e] &= MASK;
-    lenCounters[1] = 2;
-    while (e > 0)
-    {
-      int len = (codes[codes[--e] >> NUM_BITS] >> NUM_BITS) + 1;
-      codes[e] = (codes[e] & MASK) | (len << NUM_BITS);
-      if (len >= maxLen)
-        for (len = maxLen - 1; lenCounters[len] == 0; len--);
-      lenCounters[len]--;
-      lenCounters[len + 1] += 2;
-    }
-    
-    {
-      int len;
-      i = 0;
-      for (len = maxLen; len != 0; len--)
-      {
-        int num;
-        for (num = lenCounters[len]; num != 0; num--)
-          lens[codes[i++] & MASK] = len;
-      }
-    }
-    
-    {
-      List<int> nextCodes = new List<int>.filled(kMaxLen + 1, 0);
-      {
-        int code = 0;
-        int len;
-        for (len = 1; len <= kMaxLen; len++)
-          nextCodes[len] = code = (code + lenCounters[len - 1]) << 1;
-      }
 
-      for (int i = 0; i < _symbolCount; i++)
-        codes[i] = nextCodes[lens[i]]++;
+    return huffmanCodes;
+  }
+  
+  List<int> _getLengths(List<int> symbolFreq) {
+    List<int> symbolFreqCopy = new List<int>.from(symbolFreq);
+    int symbolCount = symbolFreq.length;
+    List<int> symbolLength;
+    bool tooLong = true; 
+    
+    while (tooLong) {
+      symbolLength = new List<int>.filled(symbolFreq.length, 0);
+      
+      SplayTreeMap<_HuffmanSubtree, int> subtrees = new SplayTreeMap<_HuffmanSubtree, int>();
+      for (int symbol = 0; symbol < symbolCount; symbol++) {
+        int weight = max(symbolFreqCopy[symbol], 1).toInt();
+        subtrees[new _HuffmanSubtree([symbol], weight)] = 1;
+        symbolLength[symbol] = 0;
+      }
+      
+      while (subtrees.length > 1) {
+        _HuffmanSubtree first = subtrees.firstKey();
+        _HuffmanSubtree second = subtrees.firstKeyAfter(first);
+        _HuffmanSubtree merged = first.merge(second);
+        
+        for (int symbol in merged.symbols) {
+          symbolLength[symbol]++;
+        }
+        
+        subtrees.remove(first);
+        subtrees.remove(second);
+        subtrees[merged] = 1;
+      }
+      
+      if (symbolLength.where((int length) => length > maxLen).isEmpty) {
+        tooLong = false;
+      }
+      
+      if (tooLong) {
+        for (int symbol = 0; symbol < symbolCount; symbol++) {
+          symbolFreqCopy[symbol] = 1 + (symbolFreqCopy[symbol] ~/ 2); 
+        }
+      }
     }
     
-    List<_HuffmanCode> result = new List<_HuffmanCode>.generate(_symbolCount, 
-                                            (i) => new _HuffmanCode(codes[i], lens[i]));
-    return result;
+    return symbolLength;
+  }
+  
+  List<int> _getCodes(List<int> symbolLength) {
+    List<int> lengthCount = new List<int>.filled(maxLen + 1, 0);
+    for (int length in symbolLength) {
+      lengthCount[length]++;
+    }
+        
+    List<int> nextCodeWithLength = new List<int>.filled(maxLen + 1, 0);
+    for (int len = 1; len <= maxLen; len++) {
+      nextCodeWithLength[len] = (nextCodeWithLength[len - 1] + lengthCount[len - 1]) * 2;
+    }
+
+    List<int> symbolCode = new List<int>(symbolLength.length);
+    for (int symbol = 0; symbol < symbolLength.length; symbol++) {
+      symbolCode[symbol] = nextCodeWithLength[symbolLength[symbol]]++;
+    }
+    
+    return symbolCode;
   }
 }
+

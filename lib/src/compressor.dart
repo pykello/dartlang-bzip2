@@ -339,7 +339,7 @@ class _Bzip2Compressor implements _Bzip2Coder {
       
       /* generate new tables */
       for (int table = 0; table < tableCount; table++) {
-        _HuffmanEncoder encoder = new _HuffmanEncoder(alphaSize, _MAX_HUFFMAN_LEN_FOR_ENCODING);
+        _HuffmanEncoder encoder = new _HuffmanEncoder(_MAX_HUFFMAN_LEN_FOR_ENCODING);
         huffmanTables[table] = encoder.generate(frequencyTables[table]);
       }
     }
