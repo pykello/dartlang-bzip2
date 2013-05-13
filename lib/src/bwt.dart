@@ -7,6 +7,8 @@ class _BWTEncoder {
   List<int> _nextIndex;
   _BlockOrdering _firstSymbolOrdering;
   
+  ListQueue<_BlockOrdering> _blockOrderingPool = new ListQueue<_BlockOrdering>();
+  
   int originPointer;
   List<int> blockSorted;
   
@@ -39,8 +41,16 @@ class _BWTEncoder {
     }
     
     _BlockOrdering halfSizeOrdering = _sortByBlockSize(blockSize ~/ 2);
+    if (halfSizeOrdering.bucketCount == _dataSize) {
+      return halfSizeOrdering;
+    }
     
     _BlockOrdering blockOrdering = _merge(halfSizeOrdering, halfSizeOrdering);
+
+    if (halfSizeOrdering != _firstSymbolOrdering) {
+      _blockOrderingPool.addFirst(halfSizeOrdering);
+    }
+    
     if (blockSize % 2 == 1) {
       blockOrdering = _merge(blockOrdering, _firstSymbolOrdering);
     }
@@ -53,17 +63,11 @@ class _BWTEncoder {
    * blockSize == a.blockSize + b.blockSize.
    */
   _BlockOrdering _merge(_BlockOrdering a, _BlockOrdering b) {
-    if (a.bucketCount == _dataSize) {
-      a.blockSize += b.blockSize;
-      return a;
-    }
-    
-    _BlockOrdering result = new _BlockOrdering.from(a);
-    result.blockSize = a.blockSize + b.blockSize;
+    _BlockOrdering result = _newBlockOrdering(a.blockSize + b.blockSize);
     
     for (int i = 0; i < _dataSize; i++) {
-      if (i == 0 || result.index2bucket[i] != result.index2bucket[i - 1]) {
-        _nextIndex[result.index2bucket[i]] = i;
+      if (i == 0 || a.index2bucket[i] != a.index2bucket[i - 1]) {
+        _nextIndex[a.index2bucket[i]] = i;
       }
     }
     
@@ -74,19 +78,22 @@ class _BWTEncoder {
         block += _dataSize;
       }
       
-      int index = result.block2index[block];
-      int bucket = result.index2bucket[index];
-      result.swap(_nextIndex[bucket]++, index);
+      int index = a.block2index[block];
+      int bucket = a.index2bucket[index];
+      
+      int resultIndex = _nextIndex[bucket]++;
+      result.index2block[resultIndex] = block;
+      result.block2index[block] = resultIndex;
     }
     
     /* update buckets */
     int currentBucket = 0;
     result.index2bucket[0] = 0;
+    int preBlock = result.index2block[0];
     for (int i = 1; i < _dataSize; i++) {
       bool isNewBlock;
       
       int curBlock = result.index2block[i];
-      int preBlock = result.index2block[i - 1];
       
       if (a.getBlockBucket(curBlock) == a.getBlockBucket(preBlock)) {
         int curBlock2H = (curBlock + a.blockSize) % _dataSize;
@@ -100,8 +107,9 @@ class _BWTEncoder {
       if (isNewBlock) {
         currentBucket++;
       }
-      
       result.index2bucket[i] = currentBucket;
+      
+      preBlock = curBlock;
     }
     
     result.bucketCount = currentBucket + 1;
@@ -136,6 +144,20 @@ class _BWTEncoder {
     
     return blockOrdering;
   }
+  
+  _BlockOrdering _newBlockOrdering(int blockSize) {
+    _BlockOrdering result;
+    
+    if (_blockOrderingPool.isEmpty) {
+      result = new _BlockOrdering(_dataSize, blockSize);
+    }
+    else {
+      result = _blockOrderingPool.removeFirst();
+      result.blockSize = blockSize;
+    }
+    
+    return result;
+  }
 }
 
 class _BlockOrdering {
@@ -151,27 +173,7 @@ class _BlockOrdering {
     index2bucket = new List<int>(size);
   }
   
-  _BlockOrdering.from(_BlockOrdering a) {
-    index2block = new List<int>.from(a.index2block);
-    block2index = new List<int>.from(a.block2index);
-    index2bucket = new List<int>.from(a.index2bucket);
-    blockSize = a.blockSize;
-    bucketCount = a.bucketCount;
-  }
-  
   int getBlockBucket(int block) {
     return index2bucket[block2index[block]];
-  }
-  
-  void swap(int index1, int index2) {
-    if (index2bucket[index1] != index2bucket[index2] || index1 > index2) {
-      throw new StateError("invalid swap 1");
-    }
-    int tmp = index2block[index1];
-    index2block[index1] = index2block[index2];
-    index2block[index2] = tmp;
-    
-    block2index[index2block[index1]] = index1;
-    block2index[index2block[index2]] = index2;
   }
 }
