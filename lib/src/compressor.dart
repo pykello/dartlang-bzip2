@@ -87,9 +87,9 @@ class _Bzip2Compressor implements _Bzip2Coder {
   void _compressBlock(List<int> block) {
     List<int> blockRleEncoded = _rleEncode1(block);
     
-    var bwtResult = _burrowsWheelerTransform(blockRleEncoded);
-    List<int> blockSorted = bwtResult[0];
-    _originPointer = bwtResult[1];
+    _BWTEncoder bwtEncoder = new _BWTEncoder(blockRleEncoded);
+    List<int> blockSorted = bwtEncoder.blockSorted;
+    _originPointer = bwtEncoder.originPointer;
     
     _inUse = _calculateInUse(blockSorted);
     _inUse16 = _calculateInUse16(_inUse);
@@ -212,28 +212,6 @@ class _Bzip2Compressor implements _Bzip2Coder {
     
     result = result.sublist(0, resultIndex);
     return result;
-  }
-  
-  List _burrowsWheelerTransform(List<int> _buffer) {
-    List<int> y = _buffer.map((x) => x + 1).toList();
-    String s = new String.fromCharCodes(y);
-    SuffixArray suffixArray = new SuffixArray(s + s);
-    List<int> sortedSuffixes = suffixArray.getSortedSuffixes();
-    
-    int originPointer;
-    List<int> result = new List<int>(_buffer.length);
-    int resultIndex = 0;
-    
-    for (int b in sortedSuffixes) {
-      if (b < _buffer.length) {
-        if (b == 0) {
-          originPointer = resultIndex;
-        }
-        result[resultIndex++] = _buffer[(b + _buffer.length - 1) % _buffer.length];
-      }
-    }
-    
-    return [result, originPointer];
   }
   
   List<bool> _calculateInUse(List<int> _buffer) {
