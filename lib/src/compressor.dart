@@ -66,11 +66,11 @@ class _Bzip2Compressor implements _Bzip2Coder {
     List<int> output = new List<int>(_MAX_BYTES_REQUIRED);
     int outputSize = 0;
     
-    while (_outputBuffer.bitCount() >= 8) {
+    while (_outputBuffer.usedBitCount() >= 8) {
       output[outputSize++] = _outputBuffer.readByte();
     }
     
-    int remainingBits = _outputBuffer.bitCount();
+    int remainingBits = _outputBuffer.usedBitCount();
     if (_isDone && remainingBits > 0) {
       int padding = 8 - remainingBits;
       output[outputSize++] = _outputBuffer.readBits(remainingBits) << padding;

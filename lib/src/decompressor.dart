@@ -50,7 +50,7 @@ class _Bzip2Decompressor implements _Bzip2Coder {
       case _STATE_INIT:
       case _STATE_READ_SIGNATURES:
       case _STATE_READ_BLOCK:
-        result = ((_noMoreData && !_buffer.isEmpty()) || _buffer.isFull());
+        result = ((_noMoreData && !_buffer.isEmpty()) || _buffer.freeBitCount() < 8);
         break;
       default:
         result = false;

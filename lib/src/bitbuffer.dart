@@ -87,15 +87,15 @@ class BitBuffer {
     }
   }
   
-  bool isFull() {
-    return _bufferSize - _bufferIndex >= _maxSize - 7;
-  }
-  
   bool isEmpty() {
     return _bufferSize - _bufferIndex == 0;
   }
   
-  int bitCount() {
+  int usedBitCount() {
     return _bufferSize - _bufferIndex;
+  }
+  
+  int freeBitCount() {
+    return _maxSize - usedBitCount();
   }
 }
