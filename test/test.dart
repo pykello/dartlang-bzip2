@@ -8,21 +8,23 @@ void main() {
   List<String> decompressTests = ['random.1', 'random.2', 'repeat.1', 
                                   'pg1399.txt', 'pg689.txt', 'empty'];
   List<String> compressTests = ['random.1', 'random.2', 'repeat.1', 'empty'];
-  String testDir = Directory.current.path + "/test";
+  
+  String testScript = new Options().script;
+  String testDir = testScript.substring(0,testScript.indexOf("test.dart"));
   
   testBitBuffer();
   
   group('bzip2 decompress (CRC disabled):', () {
     for(String test in decompressTests) {
-      testBzip2Decompressor(test, '$testDir/data/$test.bz2', 
-          '$testDir/expected/$test', false);
+      testBzip2Decompressor(test, '${testDir}data/$test.bz2', 
+          '${testDir}expected/$test', false);
     }
   });
   
   group('bzip2 decompress (CRC enabled):', () {
     for(String test in decompressTests) {
-      testBzip2Decompressor(test, '$testDir/data/$test.bz2', 
-          '$testDir/expected/$test', true);
+      testBzip2Decompressor(test, '${testDir}data/$test.bz2', 
+          '${testDir}expected/$test', true);
     }
   });
   
@@ -32,7 +34,7 @@ void main() {
     });
     
     for(String test in compressTests) {
-      testBzip2Compressor(test, '$testDir/expected/$test');
+      testBzip2Compressor(test, '${testDir}expected/$test');
     }
   });
 }
@@ -144,3 +146,4 @@ void testBitBuffer() {
     });
   });
 }
+
