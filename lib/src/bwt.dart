@@ -7,10 +7,12 @@ class _BWTEncoder {
   List<int> _data;
   int _dataSize;
   List<int> _nextIndex;
+  List<int> _secondHalfBucket;
   
   _BWTEncoder(List<int> this._data) {
     _dataSize = _data.length;
-    _nextIndex = new List<int>(max(_dataSize, 256).toInt());
+    _nextIndex = new List<int>(max(_dataSize, 256 * 256).toInt());
+    _secondHalfBucket = new List<int>(max(_dataSize, 256 * 256).toInt());
     _transform();
   }
   
@@ -37,6 +39,7 @@ class _BWTEncoder {
     _sortByFirstSymbol(currResult);
     
     while (currResult.bucketCount != _data.length) {
+      //print (_data.length - currResult.bucketCount);
       _BlockOrdering temp = prevResult;
       prevResult = currResult;
       currResult = temp;
@@ -54,10 +57,8 @@ class _BWTEncoder {
   void _merge(_BlockOrdering a, _BlockOrdering b, _BlockOrdering result) {
     result.blockSize = a.blockSize + b.blockSize;
     
-    for (int i = 0; i < _dataSize; i++) {
-      if (i == 0 || a.index2bucket[i] != a.index2bucket[i - 1]) {
-        _nextIndex[a.index2bucket[i]] = i;
-      }
+    for (int i = _dataSize - 1; i >= 0; i--) {
+      _nextIndex[a.index2bucket[i]] = i;
     }
     
     /* sort */
@@ -67,37 +68,27 @@ class _BWTEncoder {
         block += _dataSize;
       }
       
-      int index = a.block2index[block];
-      int bucket = a.index2bucket[index];
-      
+      int bucket = a.block2bucket[block];
       int resultIndex = _nextIndex[bucket]++;
       result.index2block[resultIndex] = block;
-      result.block2index[block] = resultIndex;
+      _secondHalfBucket[resultIndex] = b.index2bucket[i];
     }
     
     /* update buckets */
     int currentBucket = 0;
     result.index2bucket[0] = 0;
-    int preBlock = result.index2block[0];
+    result.block2bucket[result.index2block[0]] = 0;
+    int pre1stHalfBucket = a.index2bucket[0];
+    int pre2ndHalfBucket2 = _secondHalfBucket[0];
     for (int i = 1; i < _dataSize; i++) {
-      bool isNewBucket = false;
-      int curBlock = result.index2block[i];
-      
-      if (a.getBlockBucket(curBlock) == a.getBlockBucket(preBlock)) {
-        int curBlock2H = (curBlock + a.blockSize) % _dataSize;
-        int preBlock2H = (preBlock + a.blockSize) % _dataSize;
-        isNewBucket = b.getBlockBucket(curBlock2H) != b.getBlockBucket(preBlock2H); 
-      }
-      else {
-        isNewBucket = true;
-      }
-
-      if (isNewBucket) {
+      if (a.index2bucket[i] != pre1stHalfBucket || _secondHalfBucket[i] != pre2ndHalfBucket2) {
         currentBucket++;
       }
       result.index2bucket[i] = currentBucket;
+      result.block2bucket[result.index2block[i]] = currentBucket;
       
-      preBlock = curBlock;
+      pre1stHalfBucket = a.index2bucket[i];
+      pre2ndHalfBucket2 = _secondHalfBucket[i];
     }
     
     result.bucketCount = currentBucket + 1;
@@ -122,7 +113,7 @@ class _BWTEncoder {
       int symbol = _data[block];
       int index = nextIndex[symbol]++;
       result.index2block[index] = block;
-      result.block2index[block] = index;
+      result.block2bucket[block] = symbol;
       result.index2bucket[index] = symbol;
     }
     
@@ -132,18 +123,14 @@ class _BWTEncoder {
 
 class _BlockOrdering {
   List<int> index2block;
-  List<int> block2index;
+  List<int> block2bucket;
   List<int> index2bucket;
   int blockSize;
   int bucketCount;
   
   _BlockOrdering(int size) {
     index2block = new List<int>(size);
-    block2index = new List<int>(size);
+    block2bucket = new List<int>(size);
     index2bucket = new List<int>(size);
-  }
-  
-  int getBlockBucket(int block) {
-    return index2bucket[block2index[block]];
   }
 }
