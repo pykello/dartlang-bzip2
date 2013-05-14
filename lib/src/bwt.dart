@@ -1,6 +1,5 @@
 part of bzip2;
 
-
 class _BWTEncoder {
   int originPointer;
   List<int> lastColumn;
@@ -35,7 +34,6 @@ class _BWTEncoder {
     _BlockOrdering currResult = new _BlockOrdering(_dataSize);
     _BlockOrdering prevResult = new _BlockOrdering(_dataSize);
     
-    int currentBlockSize = 1;
     _sortByFirstSymbol(currResult);
     
     while (currResult.bucketCount != _data.length) {
@@ -44,8 +42,6 @@ class _BWTEncoder {
       currResult = temp;
       
       _merge(prevResult, prevResult, currResult);
-      
-      currentBlockSize *= 2;
     }
     
     return currResult;
@@ -84,7 +80,7 @@ class _BWTEncoder {
     result.index2bucket[0] = 0;
     int preBlock = result.index2block[0];
     for (int i = 1; i < _dataSize; i++) {
-      bool isNewBucket;
+      bool isNewBucket = false;
       int curBlock = result.index2block[i];
       
       if (a.getBlockBucket(curBlock) == a.getBlockBucket(preBlock)) {
