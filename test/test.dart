@@ -10,7 +10,7 @@ void main() {
   List<String> compressTests = ['random.1', 'random.2', 'repeat.1', 'empty'];
   
   String testScript = new Options().script;
-  String testDir = testScript.substring(0,testScript.indexOf("test.dart"));
+  String testDir = testScript.substring(0, testScript.indexOf("test.dart"));
   
   testBitBuffer();
   

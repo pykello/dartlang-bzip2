@@ -11,8 +11,8 @@ class _BWTEncoder {
   
   _BWTEncoder(List<int> this._data) {
     _dataSize = _data.length;
-    _nextIndex = new List<int>(max(_dataSize, 256 * 256).toInt());
-    _secondHalfBucket = new List<int>(max(_dataSize, 256 * 256).toInt());
+    _nextIndex = new List<int>(max(_dataSize, 256).toInt());
+    _secondHalfBucket = new List<int>(max(_dataSize, 256).toInt());
     _transform();
   }
   
@@ -33,21 +33,20 @@ class _BWTEncoder {
   
   /* _sortByBlockSize block sorts this._data by the specified block size */
   _BlockOrdering _blockSort() {
-    _BlockOrdering currResult = new _BlockOrdering(_dataSize);
-    _BlockOrdering prevResult = new _BlockOrdering(_dataSize);
+    _BlockOrdering curResult = new _BlockOrdering(_dataSize);
+    _BlockOrdering preResult = new _BlockOrdering(_dataSize);
     
-    _sortByFirstSymbol(currResult);
+    _sortByFirstSymbol(curResult);
     
-    while (currResult.bucketCount != _data.length) {
-      //print (_data.length - currResult.bucketCount);
-      _BlockOrdering temp = prevResult;
-      prevResult = currResult;
-      currResult = temp;
+    while (curResult.bucketCount != _data.length) {
+      _BlockOrdering temp = preResult;
+      preResult = curResult;
+      curResult = temp;
       
-      _merge(prevResult, prevResult, currResult);
+      _merge(preResult, preResult, curResult);
     }
     
-    return currResult;
+    return curResult;
   }
   
   /* 
@@ -79,16 +78,19 @@ class _BWTEncoder {
     result.index2bucket[0] = 0;
     result.block2bucket[result.index2block[0]] = 0;
     int pre1stHalfBucket = a.index2bucket[0];
-    int pre2ndHalfBucket2 = _secondHalfBucket[0];
+    int pre2ndHalfBucket = _secondHalfBucket[0];
     for (int i = 1; i < _dataSize; i++) {
-      if (a.index2bucket[i] != pre1stHalfBucket || _secondHalfBucket[i] != pre2ndHalfBucket2) {
+      int cur1stHalfBucket = a.index2bucket[i];
+      int cur2ndHalfBucket = _secondHalfBucket[i];
+      
+      if (cur1stHalfBucket != pre1stHalfBucket || pre2ndHalfBucket != cur2ndHalfBucket) {
         currentBucket++;
       }
       result.index2bucket[i] = currentBucket;
       result.block2bucket[result.index2block[i]] = currentBucket;
       
-      pre1stHalfBucket = a.index2bucket[i];
-      pre2ndHalfBucket2 = _secondHalfBucket[i];
+      pre1stHalfBucket = cur1stHalfBucket;
+      pre2ndHalfBucket = cur2ndHalfBucket;
     }
     
     result.bucketCount = currentBucket + 1;
