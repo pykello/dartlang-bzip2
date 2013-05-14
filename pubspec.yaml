@@ -1,5 +1,5 @@
 name: bzip2
-version: 0.0.4
+version: 0.0.5
 author: Hadi Moshayedi <hadi@moshayedi.net>
 description: bzip2 compression algorithm
 homepage: https://github.com/pykello/dartlang-bzip2

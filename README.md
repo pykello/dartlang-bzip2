@@ -19,9 +19,4 @@ The following code reads a compressed text file and prints it line by line:
         .transform(new LineTransformer())
         .listen((var line) => print(line));
 
-##Limitations
-The following features hasn't been implemented yet:
-
-* Randomized mode,
-* Compression.
 
