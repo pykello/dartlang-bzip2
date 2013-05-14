@@ -88,15 +88,15 @@ class _Bzip2Compressor implements _Bzip2Coder {
     List<int> blockRleEncoded = _rleEncode1(block);
     
     _BWTEncoder bwtEncoder = new _BWTEncoder(blockRleEncoded);
-    List<int> blockSorted = bwtEncoder.blockSorted;
+    List<int> blockBwtEncoded = bwtEncoder.lastColumn;
     _originPointer = bwtEncoder.originPointer;
     
-    _inUse = _calculateInUse(blockSorted);
+    _inUse = _calculateInUse(blockBwtEncoded);
     _inUse16 = _calculateInUse16(_inUse);
     List<int> symbols = _calculateSymbols(_inUse);
     int alphaSize = _getAlphaSize(_inUse);
     
-    List<int> blockMtfEncoded = _mtfEncode(blockSorted, symbols);
+    List<int> blockMtfEncoded = _mtfEncode(blockBwtEncoded, symbols);
     
     List<int> blockRleEncoded2 = _rleEncode2(blockMtfEncoded, alphaSize);
     

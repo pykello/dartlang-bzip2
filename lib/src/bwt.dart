@@ -2,15 +2,12 @@ part of bzip2;
 
 
 class _BWTEncoder {
+  int originPointer;
+  List<int> lastColumn;
+  
   List<int> _data;
   int _dataSize;
   List<int> _nextIndex;
-  _BlockOrdering _firstSymbolOrdering;
-  
-  ListQueue<_BlockOrdering> _blockOrderingPool = new ListQueue<_BlockOrdering>();
-  
-  int originPointer;
-  List<int> blockSorted;
   
   _BWTEncoder(List<int> this._data) {
     _dataSize = _data.length;
@@ -19,14 +16,13 @@ class _BWTEncoder {
   }
   
   void _transform() {
-     _firstSymbolOrdering = _sortByFirstSymbol();
-     _BlockOrdering blockOrdering = _sortByBlockSize(_dataSize);
+     _BlockOrdering blockOrdering = _blockSort();
      
-     blockSorted = new List<int>(_dataSize);
+     lastColumn = new List<int>(_dataSize);
      for (int i = 0; i < _dataSize; i++) {
        int block = blockOrdering.index2block[i];
        int symbolIndex = (block == 0 ? _dataSize - 1 : block - 1);
-       blockSorted[i] = _data[symbolIndex];
+       lastColumn[i] = _data[symbolIndex];
        
        if (block == 0) {
          originPointer = i;
@@ -35,35 +31,32 @@ class _BWTEncoder {
   }
   
   /* _sortByBlockSize block sorts this._data by the specified block size */
-  _BlockOrdering _sortByBlockSize(int blockSize) {
-    if (blockSize == 1) {
-      return _firstSymbolOrdering;
+  _BlockOrdering _blockSort() {
+    _BlockOrdering currResult = new _BlockOrdering(_dataSize);
+    _BlockOrdering prevResult = new _BlockOrdering(_dataSize);
+    
+    int currentBlockSize = 1;
+    _sortByFirstSymbol(currResult);
+    
+    while (currResult.bucketCount != _data.length) {
+      _BlockOrdering temp = prevResult;
+      prevResult = currResult;
+      currResult = temp;
+      
+      _merge(prevResult, prevResult, currResult);
+      
+      currentBlockSize *= 2;
     }
     
-    _BlockOrdering halfSizeOrdering = _sortByBlockSize(blockSize ~/ 2);
-    if (halfSizeOrdering.bucketCount == _dataSize) {
-      return halfSizeOrdering;
-    }
-    
-    _BlockOrdering blockOrdering = _merge(halfSizeOrdering, halfSizeOrdering);
-
-    if (halfSizeOrdering != _firstSymbolOrdering) {
-      _blockOrderingPool.addFirst(halfSizeOrdering);
-    }
-    
-    if (blockSize % 2 == 1) {
-      blockOrdering = _merge(blockOrdering, _firstSymbolOrdering);
-    }
-    
-    return blockOrdering;
+    return currResult;
   }
   
   /* 
    * Merge two block orderings and return a new block ordering which has 
    * blockSize == a.blockSize + b.blockSize.
    */
-  _BlockOrdering _merge(_BlockOrdering a, _BlockOrdering b) {
-    _BlockOrdering result = _newBlockOrdering(a.blockSize + b.blockSize);
+  void _merge(_BlockOrdering a, _BlockOrdering b, _BlockOrdering result) {
+    result.blockSize = a.blockSize + b.blockSize;
     
     for (int i = 0; i < _dataSize; i++) {
       if (i == 0 || a.index2bucket[i] != a.index2bucket[i - 1]) {
@@ -91,20 +84,19 @@ class _BWTEncoder {
     result.index2bucket[0] = 0;
     int preBlock = result.index2block[0];
     for (int i = 1; i < _dataSize; i++) {
-      bool isNewBlock;
-      
+      bool isNewBucket;
       int curBlock = result.index2block[i];
       
       if (a.getBlockBucket(curBlock) == a.getBlockBucket(preBlock)) {
         int curBlock2H = (curBlock + a.blockSize) % _dataSize;
         int preBlock2H = (preBlock + a.blockSize) % _dataSize;
-        isNewBlock = b.getBlockBucket(curBlock2H) != b.getBlockBucket(preBlock2H); 
+        isNewBucket = b.getBlockBucket(curBlock2H) != b.getBlockBucket(preBlock2H); 
       }
       else {
-        isNewBlock = true;
+        isNewBucket = true;
       }
 
-      if (isNewBlock) {
+      if (isNewBucket) {
         currentBucket++;
       }
       result.index2bucket[i] = currentBucket;
@@ -113,12 +105,10 @@ class _BWTEncoder {
     }
     
     result.bucketCount = currentBucket + 1;
-    
-    return result;
   }
   
-  _BlockOrdering _sortByFirstSymbol() {
-    _BlockOrdering blockOrdering = new _BlockOrdering(_dataSize, 1);
+  void _sortByFirstSymbol(_BlockOrdering result) {
+    result.blockSize = 1;
     
     List<int> symbolFreq = new List<int>.filled(256, 0);
     for (int symbol in _data) {
@@ -135,28 +125,12 @@ class _BWTEncoder {
     for (int block = 0; block < _dataSize; block++) {
       int symbol = _data[block];
       int index = nextIndex[symbol]++;
-      blockOrdering.index2block[index] = block;
-      blockOrdering.block2index[block] = index;
-      blockOrdering.index2bucket[index] = symbol;
+      result.index2block[index] = block;
+      result.block2index[block] = index;
+      result.index2bucket[index] = symbol;
     }
     
-    blockOrdering.bucketCount = symbolFreq.where((v) => v > 0).length;
-    
-    return blockOrdering;
-  }
-  
-  _BlockOrdering _newBlockOrdering(int blockSize) {
-    _BlockOrdering result;
-    
-    if (_blockOrderingPool.isEmpty) {
-      result = new _BlockOrdering(_dataSize, blockSize);
-    }
-    else {
-      result = _blockOrderingPool.removeFirst();
-      result.blockSize = blockSize;
-    }
-    
-    return result;
+    result.bucketCount = symbolFreq.where((v) => v > 0).length;
   }
 }
 
@@ -167,7 +141,7 @@ class _BlockOrdering {
   int blockSize;
   int bucketCount;
   
-  _BlockOrdering(int size, int this.blockSize) {
+  _BlockOrdering(int size) {
     index2block = new List<int>(size);
     block2index = new List<int>(size);
     index2bucket = new List<int>(size);
