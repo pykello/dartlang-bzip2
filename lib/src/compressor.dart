@@ -56,7 +56,7 @@ class _Bzip2Compressor implements _Bzip2Coder {
       _writeCompressedBlock();
     }
     
-    if (_noMoreData) {
+    if (_noMoreData && _inputSize == 0) {
       _writeFooter();
       _isDone = true;
     }
