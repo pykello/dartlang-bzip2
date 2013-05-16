@@ -1,18 +1,19 @@
 part of bzip2;
 
+/*
+ * _BWTEncoder sorts all rotations of a given sequence, and puts the last column
+ * in lastColumn, and it puts the index of unrotated sequence in the sorted sequences
+ * in originPointer.
+ */
 class _BWTEncoder {
   int originPointer;
   List<int> lastColumn;
   
   List<int> _data;
   int _dataSize;
-  List<int> _nextIndex;
-  List<int> _secondHalfBucket;
   
   _BWTEncoder(List<int> this._data) {
     _dataSize = _data.length;
-    _nextIndex = new List<int>(max(_dataSize, 256).toInt());
-    _secondHalfBucket = new List<int>(max(_dataSize, 256).toInt());
     _transform();
   }
   
@@ -56,11 +57,13 @@ class _BWTEncoder {
   void _merge(_BlockOrdering a, _BlockOrdering b, _BlockOrdering result) {
     result.blockSize = a.blockSize + b.blockSize;
     
+    List<int> nextIndex = new List<int>(_dataSize);
     for (int i = _dataSize - 1; i >= 0; i--) {
-      _nextIndex[a.index2bucket[i]] = i;
+      nextIndex[a.index2bucket[i]] = i;
     }
     
     /* sort */
+    List<int> secondHalfBucket = new List<int>(_dataSize);
     for (int i = 0; i < _dataSize; i++) {
       int block = b.index2block[i] - a.blockSize;
       if (block < 0) {
@@ -68,9 +71,9 @@ class _BWTEncoder {
       }
       
       int bucket = a.block2bucket[block];
-      int resultIndex = _nextIndex[bucket]++;
+      int resultIndex = nextIndex[bucket]++;
       result.index2block[resultIndex] = block;
-      _secondHalfBucket[resultIndex] = b.index2bucket[i];
+      secondHalfBucket[resultIndex] = b.index2bucket[i];
     }
     
     /* update buckets */
@@ -78,10 +81,10 @@ class _BWTEncoder {
     result.index2bucket[0] = 0;
     result.block2bucket[result.index2block[0]] = 0;
     int pre1stHalfBucket = a.index2bucket[0];
-    int pre2ndHalfBucket = _secondHalfBucket[0];
+    int pre2ndHalfBucket = secondHalfBucket[0];
     for (int i = 1; i < _dataSize; i++) {
       int cur1stHalfBucket = a.index2bucket[i];
-      int cur2ndHalfBucket = _secondHalfBucket[i];
+      int cur2ndHalfBucket = secondHalfBucket[i];
       
       if (cur1stHalfBucket != pre1stHalfBucket || pre2ndHalfBucket != cur2ndHalfBucket) {
         currentBucket++;
@@ -111,15 +114,29 @@ class _BWTEncoder {
       sum += symbolFreq[symbol];
     }
     
+    /* sort */
     for (int block = 0; block < _dataSize; block++) {
-      int symbol = _data[block];
-      int index = nextIndex[symbol]++;
+      int index = nextIndex[_data[block]]++;
       result.index2block[index] = block;
-      result.block2bucket[block] = symbol;
-      result.index2bucket[index] = symbol;
     }
     
-    result.bucketCount = symbolFreq.where((v) => v > 0).length;
+    /* update buckets */
+    int currentBucket = 0;
+    int preSymbol;
+    for (int index = 0; index < _dataSize; index++) {
+      int block = result.index2block[index];
+      int curSymbol = _data[block];
+      if (index != 0 && curSymbol != preSymbol) {
+        currentBucket++;
+      }
+      
+      result.block2bucket[block] = currentBucket;
+      result.index2bucket[index] = currentBucket;
+      
+      preSymbol = curSymbol;
+    }
+    
+    result.bucketCount = currentBucket + 1;
   }
 }
 
