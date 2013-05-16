@@ -181,8 +181,15 @@ class _Bzip2Compressor implements _Bzip2Coder {
   }
   
   List<int> _readBlock() {
-    List<int> result =  _input.sublist(0, _inputSize);
-    _inputSize = 0;
+    int blockSizeLimit = (_blockSizeFactor * _BLOCK_SIZE_STEP * 4) ~/ 5;
+    int blockSize = min(_inputSize, blockSizeLimit);
+    List<int> result =  _input.sublist(0, blockSize);
+    
+    for (int i = 0; i < _inputSize - blockSize; i++) {
+      _input[i] = _input[blockSize + i];
+    }
+    _inputSize -= blockSize;
+    
     return result;
   }
   
@@ -312,9 +319,10 @@ class _Bzip2Compressor implements _Bzip2Coder {
       for (int group = 0; group < selectors.length; group++) {
         int groupStart = _getGroupStart(group);
         int groupEnd = _getGroupEnd(group, block.length);
+        int table = selectors[group];
         for (int i = groupStart; i < groupEnd; i++) {
           int symbol = block[i];
-          frequencyTables[selectors[group]][symbol]++;
+          frequencyTables[table][symbol]++;
         }
       }
       
