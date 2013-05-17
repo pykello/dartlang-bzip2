@@ -1,22 +1,14 @@
 part of bzip2;
 
 class BitBuffer {
-  int _maxSize;
   List<int> _buffer;
+  int _maxBufferSize;
   int _bufferSize = 0;
   int _bufferIndex = 0;
-  int _bufferBitmask = 0;
   
   BitBuffer(int maxSize) {
-    this._maxSize = maxSize * 8;
+    this._maxBufferSize = maxSize * 8;
     this._buffer = new Int8List(maxSize * 8);
-  }
-  
-  int getIndex() {
-    return _bufferIndex;
-  }
-  int getSize() {
-    return _bufferSize;
   }
   
   int readBit() {
@@ -29,12 +21,15 @@ class BitBuffer {
   int readBits(int cnt) {
     int result = 0;
     for (int i = 0; i < cnt; i++) {
-      result = result * 2 + readBit();
+      result = (result << 1) + readBit();
     }
     return result;
   }
   
   void move(int cnt) {
+    if (_bufferIndex + cnt > _bufferSize) {
+      throw new StateError("out of data");
+    }
     _bufferIndex += cnt;
   }
   
@@ -57,7 +52,7 @@ class BitBuffer {
   }
   
   void writeBit(int bit) {
-    if (_bufferSize >= _maxSize) {
+    if (_bufferSize >= _maxBufferSize) {
       if (_bufferIndex == 0) {
         throw new StateError("buffer full");
       }
@@ -88,7 +83,7 @@ class BitBuffer {
   }
   
   bool isEmpty() {
-    return _bufferSize - _bufferIndex == 0;
+    return usedBitCount() == 0;
   }
   
   int usedBitCount() {
@@ -96,6 +91,6 @@ class BitBuffer {
   }
   
   int freeBitCount() {
-    return _maxSize - usedBitCount();
+    return _maxBufferSize - usedBitCount();
   }
 }
