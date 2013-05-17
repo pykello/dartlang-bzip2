@@ -1,73 +1,94 @@
 part of bzip2;
 
-/*
- * _BWTEncoder sorts all rotations of a given sequence, and puts the last column
- * in lastColumn, and it puts the index of unrotated sequence in the sorted sequences
- * in originPointer.
- */
-class _BWTEncoder {
-  int originPointer;
+class _BWTResult {
   List<int> lastColumn;
+  int originPointer;
   
-  List<int> _data;
-  int _dataSize;
-  
-  _BWTEncoder(List<int> this._data) {
-    _dataSize = _data.length;
-    _transform();
+  _BWTResult([List<int> this.lastColumn, int this.originPointer]);
+}
+
+class _BWTDecoder {
+  List<int> decode(_BWTResult encodedData) {
+    List<int> lastColumn = encodedData.lastColumn;
+    
+    List<int> charCounters = new List<int>.filled(256, 0);
+    for (int symbol in lastColumn) {
+      charCounters[symbol]++;
+    }
+    
+    List<int> nextIndex = new List<int>(256);
+    nextIndex[0] = 0;
+    for (int i = 1; i < 256; i++) {
+      nextIndex[i] = nextIndex[i - 1] + charCounters[i - 1];
+    }
+    
+    List<int> firstColumn = new List<int>(lastColumn.length);
+    for (int i = 0; i < lastColumn.length; i++) {
+      int symbol = lastColumn[i];
+      firstColumn[nextIndex[symbol]++] = i;
+    }
+    
+    List<int> result = new List<int>(lastColumn.length);
+    int currentIndex = firstColumn[encodedData.originPointer];
+    for (int i = 0; i < lastColumn.length; i++) {
+      result[i] = lastColumn[currentIndex];
+      currentIndex = firstColumn[currentIndex];
+    }
+    
+    return result;
   }
+}
+
+class _BWTEncoder {
   
-  void _transform() {
-     _BlockOrdering blockOrdering = _blockSort();
+  /* Calculate the burrows-wheeler transformation */ 
+  _BWTResult encode(List<int> data) {
+    _BWTResult result = new _BWTResult();
+    _BlockOrdering blockOrdering = _blockSort(data);
      
-     lastColumn = new List<int>(_dataSize);
-     for (int i = 0; i < _dataSize; i++) {
-       int block = blockOrdering.index2block[i];
-       int symbolIndex = (block == 0 ? _dataSize - 1 : block - 1);
-       lastColumn[i] = _data[symbolIndex];
-       
-       if (block == 0) {
-         originPointer = i;
-       }
-     }
+    /* calculate last column */
+    result.lastColumn = new List<int>(data.length);
+    for (int i = 0; i < data.length; i++) {
+      int block = blockOrdering.index2block[i];
+      int symbolIndex = (block == 0 ? data.length - 1 : block - 1);
+      result.lastColumn[i] = data[symbolIndex];
+    }
+    
+    /* calculate origin pointer */
+    result.originPointer = blockOrdering.index2block.indexOf(0);
+    
+    return result;
   }
   
   /* _sortByBlockSize block sorts this._data by the specified block size */
-  _BlockOrdering _blockSort() {
-    _BlockOrdering curResult = new _BlockOrdering(_dataSize);
-    _BlockOrdering preResult = new _BlockOrdering(_dataSize);
+  _BlockOrdering _blockSort(List<int> data) {
+    _BlockOrdering blockOrdering = _sortByFirstSymbol(data);
     
-    _sortByFirstSymbol(curResult);
-    
-    while (curResult.bucketCount != _data.length) {
-      _BlockOrdering temp = preResult;
-      preResult = curResult;
-      curResult = temp;
-      
-      _merge(preResult, preResult, curResult);
+    while (blockOrdering.bucketCount != data.length) {
+      blockOrdering = _merge(blockOrdering, blockOrdering);
     }
     
-    return curResult;
+    return blockOrdering;
   }
   
   /* 
    * Merge two block orderings and return a new block ordering which has 
-   * blockSize == a.blockSize + b.blockSize.
+   * blockSize equal to a.blockSize + b.blockSize.
    */
-  void _merge(_BlockOrdering a, _BlockOrdering b, _BlockOrdering result) {
-    result.blockSize = a.blockSize + b.blockSize;
+  _BlockOrdering _merge(_BlockOrdering a, _BlockOrdering b) {
+    _BlockOrdering result = new _BlockOrdering(a.dataSize, a.blockSize + b.blockSize);
     
-    List<int> nextIndex = new List<int>(_dataSize);
-    for (int i = _dataSize - 1; i >= 0; i--) {
+    List<int> nextIndex = new List<int>(result.dataSize);
+    for (int i = result.dataSize - 1; i >= 0; i--) {
       nextIndex[a.index2bucket[i]] = i;
     }
     
     /* sort */
-    List<int> secondHalfBucket = new List<int>(_dataSize);
-    for (int i = 0; i < _dataSize; i++) {
+    List<int> secondHalfBucket = new List<int>(result.dataSize);
+    for (int i = 0; i < result.dataSize; i++) {
       int block = b.index2block[i] - a.blockSize;
       if (block < 0) {
-        block += _dataSize;
+        block += result.dataSize;
       }
       
       int bucket = a.block2bucket[block];
@@ -82,7 +103,7 @@ class _BWTEncoder {
     result.block2bucket[result.index2block[0]] = 0;
     int pre1stHalfBucket = a.index2bucket[0];
     int pre2ndHalfBucket = secondHalfBucket[0];
-    for (int i = 1; i < _dataSize; i++) {
+    for (int i = 1; i < result.dataSize; i++) {
       int cur1stHalfBucket = a.index2bucket[i];
       int cur2ndHalfBucket = secondHalfBucket[i];
       
@@ -97,13 +118,18 @@ class _BWTEncoder {
     }
     
     result.bucketCount = currentBucket + 1;
+    return result;
   }
   
-  void _sortByFirstSymbol(_BlockOrdering result) {
-    result.blockSize = 1;
+  /*
+   * Calculate the block ordering of all rotations of data when they are sorted
+   * by the first symbol.
+   */
+  _BlockOrdering _sortByFirstSymbol(List<int> data) {
+    _BlockOrdering result = new _BlockOrdering(data.length, 1);
     
     List<int> symbolFreq = new List<int>.filled(256, 0);
-    for (int symbol in _data) {
+    for (int symbol in data) {
       symbolFreq[symbol]++;
     }
     
@@ -115,17 +141,17 @@ class _BWTEncoder {
     }
     
     /* sort */
-    for (int block = 0; block < _dataSize; block++) {
-      int index = nextIndex[_data[block]]++;
+    for (int block = 0; block < data.length; block++) {
+      int index = nextIndex[data[block]]++;
       result.index2block[index] = block;
     }
     
     /* update buckets */
     int currentBucket = 0;
     int preSymbol;
-    for (int index = 0; index < _dataSize; index++) {
+    for (int index = 0; index < data.length; index++) {
       int block = result.index2block[index];
-      int curSymbol = _data[block];
+      int curSymbol = data[block];
       if (index != 0 && curSymbol != preSymbol) {
         currentBucket++;
       }
@@ -137,6 +163,7 @@ class _BWTEncoder {
     }
     
     result.bucketCount = currentBucket + 1;
+    return result;
   }
 }
 
@@ -145,11 +172,12 @@ class _BlockOrdering {
   List<int> block2bucket;
   List<int> index2bucket;
   int blockSize;
+  int dataSize;
   int bucketCount;
   
-  _BlockOrdering(int size) {
-    index2block = new List<int>(size);
-    block2bucket = new List<int>(size);
-    index2bucket = new List<int>(size);
+  _BlockOrdering(int this.dataSize, int this.blockSize) {
+    index2block = new List<int>(dataSize);
+    block2bucket = new List<int>(dataSize);
+    index2bucket = new List<int>(dataSize);
   }
 }

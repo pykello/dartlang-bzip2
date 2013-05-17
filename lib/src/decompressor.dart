@@ -272,7 +272,9 @@ class _Bzip2Decompressor implements _Bzip2Coder {
   List<int> _decodeHuffmanBlock(List<int> huffmanBlock, List<int> symbols) {
     List<int> rle2DecodedBlock = _rleDecode2(huffmanBlock);
     List<int> mtfDecodedBlock = _mtfDecode(rle2DecodedBlock, symbols);
-    List<int> bwtDecodedBlock = _bwtDecode(mtfDecodedBlock);
+    _BWTDecoder bwtDecoder = new _BWTDecoder();
+    _BWTResult bwtEncodedData = new _BWTResult(mtfDecodedBlock, _originPointer);
+    List<int> bwtDecodedBlock = bwtDecoder.decode(bwtEncodedData);
     List<int> rle1DecodedBlock = _rleDecode1(bwtDecodedBlock);
     
     return rle1DecodedBlock;
@@ -321,34 +323,6 @@ class _Bzip2Decompressor implements _Bzip2Coder {
     }
     
     result = result.sublist(0, resultSize);
-    return result;
-  }
-  
-  List<int> _bwtDecode(List<int> block) {
-    List<int> charCounters = new List<int>.filled(256, 0);
-    for (int symbol in block) {
-      charCounters[symbol]++;
-    }
-    
-    List<int> nextIndex = new List<int>(256);
-    nextIndex[0] = 0;
-    for (int i = 1; i < 256; i++) {
-      nextIndex[i] = nextIndex[i - 1] + charCounters[i - 1];
-    }
-    
-    List<int> sorted = new List<int>(block.length);
-    for (int i = 0; i < block.length; i++) {
-      int symbol = block[i];
-      sorted[nextIndex[symbol]++] = i;
-    }
-    
-    List<int> result = new List<int>(block.length);
-    int currentIndex = sorted[_originPointer];
-    for (int i = 0; i < block.length; i++) {
-      result[i] = block[currentIndex];
-      currentIndex = sorted[currentIndex];
-    }
-    
     return result;
   }
   
