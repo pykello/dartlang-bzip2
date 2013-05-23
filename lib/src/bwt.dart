@@ -10,7 +10,7 @@ part of bzip2;
 /* output type of encoder and input type of decoder */
 class _BWTResult {
   List<int> lastColumn;   /* last column in the matrix of sorted rotations */
-  int originPointer;      /* index of original string in matrix of sroted rotations */
+  int originPointer;      /* index of original string in matrix of sorted rotations */
   
   _BWTResult([List<int> this.lastColumn, int this.originPointer]);
 }
