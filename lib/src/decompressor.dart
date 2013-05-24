@@ -14,7 +14,7 @@ class _Bzip2Decompressor implements _Bzip2Coder {
   bool _checkCrc;
   
   /* input state */
-  BitBuffer _buffer = new BitBuffer(_MAX_BYTES_REQUIRED);
+  _BitBuffer _buffer = new _BitBuffer(_MAX_BYTES_REQUIRED);
   bool _noMoreData = false;
   _Bzip2CombinedCrc _fileCrc = new _Bzip2CombinedCrc();
   

@@ -49,7 +49,7 @@ class _HuffmanDecoder {
     return true;
   }
   
-  int decodeSymbol(BitBuffer buffer) {
+  int decodeSymbol(_BitBuffer buffer) {
     int value = buffer.peekBits(_maxLength);
 
     int length = 1;

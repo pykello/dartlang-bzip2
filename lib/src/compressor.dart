@@ -23,7 +23,7 @@ class _Bzip2Compressor implements _Bzip2Coder {
   List<int> _selectors;
   
   /* output state */
-  BitBuffer _outputBuffer = new BitBuffer(_MAX_BYTES_REQUIRED);
+  _BitBuffer _outputBuffer = new _BitBuffer(_MAX_BYTES_REQUIRED);
 
   _Bzip2Compressor(this._blockSizeFactor) {
     if (this._blockSizeFactor < 1 || this._blockSizeFactor > 9) {

@@ -1,12 +1,12 @@
 part of bzip2;
 
-class BitBuffer {
+class _BitBuffer {
   List<int> _buffer;
   int _maxBufferSize;
   int _bufferSize = 0;
   int _bufferIndex = 0;
   
-  BitBuffer(int maxSize) {
+  _BitBuffer(int maxSize) {
     this._maxBufferSize = maxSize * 8;
     this._buffer = new Int8List(maxSize * 8);
   }

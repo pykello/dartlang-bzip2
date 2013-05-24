@@ -11,9 +11,7 @@ void main() {
   
   String testScript = new Options().script;
   String testDir = testScript.substring(0, testScript.indexOf("test.dart"));
-  
-  testBitBuffer();
-  
+    
   group('bzip2 decompress (CRC disabled):', () {
     for(String test in decompressTests) {
       testBzip2Decompressor(test, '${testDir}data/$test.bz2', 
@@ -80,70 +78,5 @@ void verifyStreamOutput(Stream inputStream, String expectedFilename) {
   var asyncDoneCallback = expectAsync0(doneCallback);
   
   inputStream.listen(asyncDataCallback, onDone: asyncDoneCallback);
-}
-
-void testBitBuffer() {
-  group('bitbuffer:', () {
-    BitBuffer bitbuffer;
-    
-    setUp(() {
-      bitbuffer = new BitBuffer(2);
-    });
-    
-    test('write byte 1', () {
-      bitbuffer.writeByte(255);
-      expect(bitbuffer.readByte(), 255);
-    });
-    
-    test('write byte 2', () {
-      bitbuffer.writeByte(1);
-      bitbuffer.writeByte(2);
-      expect(bitbuffer.readByte(), 1);
-      bitbuffer.writeByte(3);
-      expect(bitbuffer.readByte(), 2);
-      expect(bitbuffer.readByte(), 3);
-    });
-    
-    test('overflow', () {
-      bitbuffer.writeByte(1);
-      bitbuffer.writeByte(1);
-      expect(() => bitbuffer.writeByte(3), throws);
-    });
-    
-    test('read bits 1', () {
-      bitbuffer.writeByte(255);
-      expect(bitbuffer.readBits(3), equals(7));
-      expect(bitbuffer.readBits(5), equals(31));
-    });
-    
-    test('read bits 2', () {
-      bitbuffer.writeByte(1);
-      bitbuffer.writeByte(1);
-      expect(bitbuffer.readBits(1), equals(0));
-      expect(bitbuffer.readBits(8), equals(2));
-      expect(bitbuffer.readBits(7), equals(1));
-    });
-    
-    test('out of data', () {
-      bitbuffer.writeByte(1);
-      expect(() => bitbuffer.readBits(9), throws);
-    });
-    
-    test('read bytes', () {
-      bitbuffer.writeByte(1);
-      bitbuffer.writeByte(2);
-      expect(bitbuffer.readBytes(2), equals([1, 2]));
-    });
-    
-    test('peek bits', () {
-      bitbuffer.writeByte(1);
-      bitbuffer.writeByte(2);
-      expect(bitbuffer.peekBits(8), equals(1));
-      expect(bitbuffer.peekBits(8), equals(1));
-      bitbuffer.move(8);
-      expect(bitbuffer.peekBits(8), equals(2));
-      expect(bitbuffer.readByte(), equals(2));
-    });
-  });
 }
 
