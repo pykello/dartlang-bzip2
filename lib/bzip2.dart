@@ -16,11 +16,18 @@ part 'src/decompressor.dart';
 part 'src/huffmandecoder.dart';
 part 'src/huffmanencoder.dart';
 
-abstract class _Bzip2Transformer extends 
-    StreamEventTransformer<List<int>, List<int>> {
+abstract class _Bzip2Transformer implements 
+    StreamTransformer<List<int>, List<int>> {
       
   _Bzip2Coder _coder;
-  _Bzip2Transformer(this._coder);
+  _Bzip2Transformer(_Bzip2Coder this._coder);
+  
+  Stream bind(Stream stream) {
+    return stream.transform(new StreamTransformer.fromHandlers(
+      handleData: this.handleData,
+      handleDone: this.handleDone
+    ));
+  }
   
   void handleData(List<int> data, EventSink<List<int>> sink) {
     for (int byte in data) {

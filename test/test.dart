@@ -9,7 +9,7 @@ void main() {
                                   'pg1399.txt', 'pg689.txt', 'empty'];
   List<String> compressTests = ['random.1', 'random.2', 'repeat.1', 'empty'];
   
-  String testScript = new Options().script;
+  String testScript = Platform.script.toFilePath();
   String testDir = testScript.substring(0, testScript.indexOf("test.dart"));
     
   group('bzip2 decompress (CRC disabled):', () {
@@ -68,14 +68,14 @@ void verifyStreamOutput(Stream inputStream, String expectedFilename) {
       expect(data, equals(expectedData));
     }
   };
-  var asyncDataCallback = expectAsyncUntil1(dataCallback, () => done);
+  var asyncDataCallback = expectAsyncUntil(dataCallback, () => done);
   
   var doneCallback = () {
     expect(expectedFile.readByteSync(), equals(-1));
     done = true;
     asyncDataCallback([]);
   };
-  var asyncDoneCallback = expectAsync0(doneCallback);
+  var asyncDoneCallback = expectAsync(doneCallback);
   
   inputStream.listen(asyncDataCallback, onDone: asyncDoneCallback);
 }
