@@ -4,7 +4,7 @@
 Add this to your package's pubspec.yaml file:
 
     dependencies:
-      bzip2: 0.0.5
+      bzip2: 0.0.6
 
 If your package is an [application package](http://pub.dartlang.org/doc/glossary.html#application-package) you should use **any** as the [version constraint](http://pub.dartlang.org/doc/glossary.html#version-constraint).
 
